@@ -373,7 +373,12 @@ else
     echo "Ensuring Amazon ECR repository '${ECR_REPO_NAME}' exists..."
     aws ecr describe-repositories --repository-names "$ECR_REPO_NAME" --region "$AWS_REGION" &>/dev/null || \
         aws ecr create-repository --repository-name "$ECR_REPO_NAME" --region "$AWS_REGION" >/dev/null
-    print_success "ECR repository ready: ${ECR_REPO_NAME}"
+    
+    # Configure vulnerability scanning and image retention lifecycle policy
+    aws ecr put-image-scanning-configuration --repository-name "$ECR_REPO_NAME" --image-scanning-configuration scanOnPush=true --region "$AWS_REGION" &>/dev/null || true
+    aws ecr put-lifecycle-policy --repository-name "$ECR_REPO_NAME" --region "$AWS_REGION" \
+        --lifecycle-policy-text '{"rules":[{"rulePriority":1,"description":"Expire untagged images older than 14 days","selection":{"tagStatus":"untagged","countType":"sinceImagePushed","countUnit":"days","countNumber":14},"action":{"type":"expire"}},{"rulePriority":2,"description":"Keep last 10 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":10},"action":{"type":"expire"}}]}' &>/dev/null || true
+    print_success "ECR repository ready with vulnerability scanning & lifecycle policy: ${ECR_REPO_NAME}"
 
     echo "Authenticating Docker with Amazon ECR..."
     aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"

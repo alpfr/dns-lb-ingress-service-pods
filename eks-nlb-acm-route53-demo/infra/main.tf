@@ -148,8 +148,9 @@ provider "helm" {
 }
 
 resource "aws_acm_certificate" "app" {
-  domain_name       = "${var.app_subdomain}.${var.domain_name}"
-  validation_method = "DNS"
+  domain_name               = "${var.app_subdomain}.${var.domain_name}"
+  subject_alternative_names = [var.domain_name, "*.${var.domain_name}"]
+  validation_method         = "DNS"
 
   lifecycle {
     create_before_destroy = true
@@ -236,7 +237,9 @@ resource "helm_release" "ingress_nginx" {
         }
       }
       config = {
-        "use-forwarded-headers" = "true"
+        "use-forwarded-headers"  = "true"
+        "log-format-escape-json" = "true"
+        "log-format-upstream"    = "{\"timestamp\":\"$time_iso8601\",\"client_ip\":\"$remote_addr\",\"forwarded_for\":\"$proxy_add_x_forwarded_for\",\"host\":\"$host\",\"request_method\":\"$request_method\",\"uri\":\"$request_uri\",\"status\":$status,\"bytes_sent\":$bytes_sent,\"request_time\":$request_time,\"upstream_response_time\":\"$upstream_response_time\",\"upstream_status\":\"$upstream_status\",\"user_agent\":\"$http_user_agent\"}"
       }
       metrics = {
         enabled = true
@@ -482,7 +485,10 @@ resource "kubernetes_ingress_v1" "app" {
     annotations = {
       # Since SSL is terminated at the AWS NLB and passed as HTTP to Ingress NGINX,
       # ssl-redirect MUST be false to avoid an infinite 308 redirect loop.
-      "nginx.ingress.kubernetes.io/ssl-redirect" = "false"
+      "nginx.ingress.kubernetes.io/ssl-redirect"      = "false"
+      "nginx.ingress.kubernetes.io/limit-rps"         = "50"
+      "nginx.ingress.kubernetes.io/limit-connections" = "20"
+      "nginx.ingress.kubernetes.io/proxy-body-size"   = "10m"
     }
   }
 
@@ -514,4 +520,43 @@ resource "kubernetes_ingress_v1" "app" {
     helm_release.ingress_nginx,
     kubernetes_service_v1.app
   ]
+}
+
+resource "kubernetes_network_policy_v1" "app_ingress_isolation" {
+  metadata {
+    name      = "demo-app-ingress-only"
+    namespace = "default"
+  }
+
+  spec {
+    pod_selector {
+      match_labels = {
+        app = "demo-app"
+      }
+    }
+
+    policy_types = ["Ingress"]
+
+    ingress {
+      from {
+        namespace_selector {
+          match_labels = {
+            "kubernetes.io/metadata.name" = "ingress-nginx"
+          }
+        }
+        pod_selector {
+          match_labels = {
+            "app.kubernetes.io/name" = "ingress-nginx"
+          }
+        }
+      }
+
+      ports {
+        port     = "8080"
+        protocol = "TCP"
+      }
+    }
+  }
+
+  depends_on = [module.eks]
 }

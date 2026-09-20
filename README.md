@@ -143,6 +143,26 @@ graph TD
 - Hardens Kubernetes resource dependencies (`depends_on = [module.eks]`) against control-plane auth cache propagation delays for newly attached `AmazonEKSClusterAdminPolicy` access entries.
 - Added automatic secondary reconciliation apply in `scripts/deploy.sh` to ensure completely hands-off execution without transient failures.
 
+### 11. Amazon ECR Vulnerability Scanning & Image Lifecycle Retention
+- **Automated Scan on Push**: Every image pushed to Amazon ECR triggers automated CVE vulnerability scanning (`scanOnPush = true`), alerting teams to common base image vulnerabilities prior to cluster deployment.
+- **Automated Lifecycle Policy**: Cleans up dangling untagged images older than 14 days and retains only the 10 most recent images, eliminating storage bloat and AWS ECR storage costs.
+
+### 12. Zero-Trust Kubernetes NetworkPolicy (Ingress Isolation)
+- **Pod-to-Pod Traffic Segmentation**: Implements `kubernetes_network_policy_v1.app_ingress_isolation` in the `default` namespace.
+- **Strict Ingress Rule**: Drops all traffic to `demo-app` pods on port 8080 *except* requests originating from pods labeled `app.kubernetes.io/name = ingress-nginx` residing inside the `ingress-nginx` namespace. This prevents compromised workloads in other namespaces or pods from moving laterally within the cluster network.
+
+### 13. Wildcard & Apex Subject Alternative Names (SANs) on ACM
+- **Broad Domain Coverage**: The public ACM certificate covers both the root apex (`alpfrtech.com`), the primary service subdomain (`app.alpfrtech.com`), and all future subdomains via wildcard (`*.alpfrtech.com`).
+- **Collision-Resistant DNS Validation**: Terraform keys Route 53 validation records by `dvo.domain_name` with `allow_overwrite = true`, preventing duplicate key collisions in Terraform state while ensuring AWS validates both apex and wildcard SANs simultaneously.
+
+### 14. Layer 7 Rate Limiting & Connection Throttling
+- **Ingress NGINX Rate Limiting**: Ingress resource specifies `nginx.ingress.kubernetes.io/limit-rps = "50"` and `limit-connections = "20"`.
+- **Payload Protection**: Sets `nginx.ingress.kubernetes.io/proxy-body-size = "10m"`, mitigating Denial of Service (DoS) attacks, brute-force bursts, and large payload buffer exhaustion.
+
+### 15. Structured JSON Upstream Access Logging
+- **Observability & Analytics**: Ingress NGINX controller ConfigMap configures `log-format-escape-json = "true"` and emits uniform JSON access log records with timestamp, client IP, host, HTTP method, upstream status, request time, and upstream response time.
+- **Log Shipper Compatibility**: Ready for immediate parsing by CloudWatch Container Insights, AWS OpenSearch, Datadog, or Grafana Loki without complex grok patterns.
+
 ---
 
 ## Repository Layout

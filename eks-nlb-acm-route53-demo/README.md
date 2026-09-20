@@ -47,6 +47,11 @@ This module contains the complete, production-ready implementation of an **Amazo
   - **Non-Root & Capability Drop**: Runs as UID `10001` with all Linux capabilities dropped and `RuntimeDefault` seccomp.
   - **Route 53 CAA Record**: Restricts public certificate issuance strictly to `amazon.com`.
   - **S3 State Storage**: Enforces `BucketOwnerEnforced`, encryption, versioning, public access blocks, and native S3 state locking.
+- **Zero-Trust NetworkPolicy (Ingress Isolation)**: Kubernetes `NetworkPolicy` restricts inbound pod traffic on port 8080 strictly to Ingress NGINX controller pods in `ingress-nginx`, blocking lateral pod-to-pod network traversals.
+- **Layer 7 Rate Limiting & Connection Throttling**: Ingress resource enforces `limit-rps = 50`, `limit-connections = 20`, and `proxy-body-size = 10m` to mitigate burst DDoS and buffer attacks.
+- **Structured JSON Access Logging**: Ingress NGINX controller emits structured JSON access logs with client IP, host, HTTP method, upstream status, request time, and upstream response times.
+- **Wildcard & Apex Subject Alternative Names (SANs)**: Public ACM certificate covers `app.alpfrtech.com`, root apex `alpfrtech.com`, and `*.alpfrtech.com`.
+- **ECR Scanning & Retention Lifecycle**: Container repository is configured with `scanOnPush = true` and automated lifecycle pruning of untagged images >14 days while retaining the last 10 images.
 - **Dynamic Provider Authentication**: The `kubernetes` and `helm` Terraform providers use `aws eks get-token` via dynamic `exec` blocks, avoiding the 15-minute token expiration issue during long cluster creation runs.
 - **Access Entry & RBAC Hardening**: Explicit `depends_on` relationships prevent race conditions between newly attached `AmazonEKSClusterAdminPolicy` access entries and Kubernetes service/ingress manifest application.
 - **Network & WSGI Tuning**: Gunicorn uses `--keep-alive 65` (exceeding the NLB 60s idle timeout) with 2 workers and 2 threads.

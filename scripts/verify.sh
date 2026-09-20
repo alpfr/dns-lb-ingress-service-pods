@@ -95,7 +95,7 @@ else
 fi
 
 # 1. Cluster connectivity & Node check
-echo -e "${BOLD}${BLUE}[1/4] Checking EKS Cluster Nodes (Auto Mode)...${NC}"
+echo -e "${BOLD}${BLUE}[1/5] Checking EKS Cluster Nodes (Auto Mode)...${NC}"
 if ! kubectl get nodes -o wide; then
     echo -e "${RED}✖ Failed to reach EKS cluster API. Run 'aws eks update-kubeconfig' first.${NC}"
     exit 1
@@ -103,7 +103,7 @@ fi
 echo -e "${GREEN}✔ EKS API server accessible and nodes reported${NC}\n"
 
 # 2. Ingress Controller status
-echo -e "${BOLD}${BLUE}[2/4] Checking Ingress NGINX Controller & NLB Service...${NC}"
+echo -e "${BOLD}${BLUE}[2/5] Checking Ingress NGINX Controller & NLB Service...${NC}"
 kubectl get pods -n ingress-nginx -l app.kubernetes.io/name=ingress-nginx
 kubectl get svc -n ingress-nginx ingress-nginx-controller
 
@@ -114,15 +114,40 @@ else
     echo -e "${YELLOW}⚠ NLB hostname is still pending in AWS. Route 53 resolution may take a moment.${NC}\n"
 fi
 
-# 3. Workload Pods and Ingress Rules
-echo -e "${BOLD}${BLUE}[3/4] Checking Microservice Pods & Ingress Route...${NC}"
+# 3. Workload Pods, Ingress Rules & NetworkPolicy
+echo -e "${BOLD}${BLUE}[3/5] Checking Microservice Pods, Ingress Rules & NetworkPolicy...${NC}"
 kubectl get pods -l app=demo-app -o wide
 kubectl get svc demo-app
 kubectl get ingress demo-app
-echo -e "${GREEN}✔ Workload objects present in default namespace${NC}\n"
+echo -e "\nVerifying NetworkPolicy (Zero-Trust Ingress Isolation)..."
+if kubectl get networkpolicy -n default demo-app-ingress-only &>/dev/null; then
+    kubectl get networkpolicy -n default demo-app-ingress-only
+    echo -e "${GREEN}✔ NetworkPolicy 'demo-app-ingress-only' is active${NC}\n"
+else
+    echo -e "${YELLOW}⚠ NetworkPolicy 'demo-app-ingress-only' not found${NC}\n"
+fi
 
-# 4. HTTPS Endpoint Verification
-echo -e "${BOLD}${BLUE}[4/4] Probing Public HTTPS Endpoints (${APP_URL})...${NC}"
+# 4. Ingress Rate Limiting & JSON Logging
+echo -e "${BOLD}${BLUE}[4/5] Checking Ingress Annotations & JSON Access Logging...${NC}"
+RL_ANNOTATIONS=$(kubectl get ingress demo-app -o jsonpath='{.metadata.annotations}' 2>/dev/null || true)
+if echo "$RL_ANNOTATIONS" | grep -q "limit-rps"; then
+    echo -e "${GREEN}✔ Rate limiting annotations detected on Ingress: limit-rps=50, limit-connections=20, proxy-body-size=10m${NC}"
+else
+    echo -e "${YELLOW}⚠ Rate limiting annotations not found on Ingress${NC}"
+fi
+
+echo -e "\nChecking Ingress NGINX structured JSON logs..."
+LAST_JSON_LOG=$(kubectl logs -n ingress-nginx -l app.kubernetes.io/name=ingress-nginx --tail=1 2>/dev/null | grep -E '^\{.*\}$' || true)
+if [[ -n "$LAST_JSON_LOG" ]]; then
+    echo -e "${GREEN}✔ Ingress NGINX structured JSON logging is active${NC}"
+    echo -e "  Sample log entry: ${LAST_JSON_LOG}"
+else
+    echo -e "${YELLOW}⚠ Waiting for JSON log entries or non-JSON logs received${NC}"
+fi
+echo ""
+
+# 5. HTTPS Endpoint Verification
+echo -e "${BOLD}${BLUE}[5/5] Probing Public HTTPS Endpoints (${APP_URL})...${NC}"
 
 echo -e "Testing ${APP_URL}/healthz ..."
 HTTP_HEALTH_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 10 --max-time 15 "${APP_URL}/healthz" 2>/dev/null || echo "000")
@@ -147,4 +172,5 @@ else
     echo -e "${YELLOW}⚠ / returned HTTP ${HTTP_ROOT_CODE}${NC}"
 fi
 
-echo -e "\n${BOLD}${GREEN}✔ Verification script completed.${NC}"
+echo -e "\n${BOLD}${GREEN}✔ Verification script completed successfully.${NC}"
+

@@ -18,18 +18,22 @@ This module contains the complete, production-ready implementation of an **Amazo
 [Amazon Route 53 Public Hosted Zone] (CNAME: app.alpfrtech.com -> NLB DNS)
        │
        ▼
-[AWS Network Load Balancer] (TLS Terminated with ACM Public Certificate)
+[AWS Network Load Balancer] (TLS Terminated with ACM Certificate: *.alpfrtech.com)
        │
        │  Plain HTTP / TCP (Port 80)
        ▼
 [NGINX Ingress Controller] (Host & Path Routing in namespace: ingress-nginx)
-       │
+       │  • Layer 7 Rate Limiting (50 rps | 20 connections | 10MB payload limit)
+       │  • Structured JSON Upstream Access Logging
        │  ClusterIP (Port 80)
        ▼
 [Kubernetes Service: demo-app] (TargetPort: 8080 in namespace: default)
        │
        ▼
-[Hardened Flask Pods running via Gunicorn] (Non-root user 10001)
+[Zero-Trust NetworkPolicy: demo-app-ingress-only] (Permits port 8080 ONLY from ingress-nginx)
+       │
+       ▼
+[Hardened Flask Pods running via Gunicorn] (Non-root UID 10001, HPA 2-10 replicas)
 ```
 
 ---

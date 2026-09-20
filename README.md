@@ -46,6 +46,8 @@ A production-grade, enterprise-hardened Terraform starter demonstrating automate
  │   │   • Host-Based & Path-Based Layer 7 Routing                                             │   │
  │   │   • ssl-redirect: "false" (Prevents ERR_TOO_MANY_REDIRECTS loop)                        │   │
  │   │   • use-forwarded-headers: "true" (Preserves client IP & X-Forwarded-Proto)             │   │
+ │   │   • Rate Limiting: 50 rps | 20 max connections | 10MB payload size                      │   │
+ │   │   • Structured JSON Access Logging (log-format-escape-json = "true")                    │   │
  │   │   • Prometheus Metrics Enabled on port 10254                                            │   │
  │   └─────────────────────────────────────────────┬───────────────────────────────────────────┘   │
  │                                                 │                                               │
@@ -55,6 +57,12 @@ A production-grade, enterprise-hardened Terraform starter demonstrating automate
  │   ┌─────────────────────────────────────────────────────────────────────────────────────────┐   │
  │   │ Kubernetes Service: demo-app (ClusterIP)                                                │   │
  │   │   • TargetPort: 8080                                                                    │   │
+ │   └─────────────────────────────────────────────┬───────────────────────────────────────────┘   │
+ │                                                 │                                               │
+ │                                                 ▼                                               │
+ │   ┌─────────────────────────────────────────────────────────────────────────────────────────┐   │
+ │   │ Zero-Trust Kubernetes NetworkPolicy (demo-app-ingress-only)                             │   │
+ │   │   • Enforces strict Ingress to TCP 8080 ONLY from namespace ingress-nginx              │   │
  │   └─────────────────────────────────────────────┬───────────────────────────────────────────┘   │
  │                                                 │                                               │
  │                                                 │ TargetPort (8080)                             │
@@ -80,14 +88,19 @@ graph TD
     Client([Internet Client]) -->|HTTPS :443| R53[Route 53 DNS Record]
     R53 -->|CNAME / Alias| NLB[AWS Network Load Balancer]
     subgraph AWS Network Load Balancer
-        ACM[ACM Certificate] -.->|Decrypts TLS| NLB
+        ACM[ACM Certificate: *.alpfrtech.com] -.->|Decrypts TLS| NLB
         Probe[Health Probe :10254 /healthz] -.->|Direct HTTP Probe| NGINX
     end
     NLB -->|Plain HTTP :80| NGINX[NGINX Ingress Controller - 2 Replicas, PDB]
-    subgraph EKS Auto Mode Cluster
-        NGINX -->|Route Host/Path| Svc[Kubernetes Service: demo-app]
-        Svc -->|Port 8080| Pod1[demo-app Pod 1 - Zone A]
-        Svc -->|Port 8080| Pod2[demo-app Pod 2 - Zone B]
+    subgraph Ingress Layer
+        NGINX -->|Rate Limits & JSON Logging| Svc[Kubernetes Service: demo-app]
+    end
+    subgraph Zero-Trust Isolation
+        Svc -->|Evaluates Policy| NP[NetworkPolicy: demo-app-ingress-only]
+    end
+    subgraph Workload Pods
+        NP -->|Allowed TCP 8080| Pod1[demo-app Pod 1 - Zone A]
+        NP -->|Allowed TCP 8080| Pod2[demo-app Pod 2 - Zone B]
         HPA[HPA 2-10 Replicas] -.->|Autoscales| Pod1
         HPA -.->|Autoscales| Pod2
     end
@@ -287,7 +300,12 @@ ECR_URI="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:${IM
 # 2. Create the ECR repository (if not already present)
 aws ecr create-repository --repository-name "$ECR_REPO_NAME" --region "$AWS_REGION" 2>/dev/null || true
 
-# 3. Authenticate Docker with Amazon ECR
+# 3. Configure automated vulnerability scanning and image retention lifecycle policy
+aws ecr put-image-scanning-configuration --repository-name "$ECR_REPO_NAME" --image-scanning-configuration scanOnPush=true --region "$AWS_REGION"
+aws ecr put-lifecycle-policy --repository-name "$ECR_REPO_NAME" --region "$AWS_REGION" \
+    --lifecycle-policy-text '{"rules":[{"rulePriority":1,"description":"Expire untagged images older than 14 days","selection":{"tagStatus":"untagged","countType":"sinceImagePushed","countUnit":"days","countNumber":14},"action":{"type":"expire"}},{"rulePriority":2,"description":"Keep last 10 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":10},"action":{"type":"expire"}}]}'
+
+# 4. Authenticate Docker with Amazon ECR
 aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
 # 4. Build, tag, and push the image
@@ -382,8 +400,15 @@ kubectl get pods -l app=demo-app -o wide
 # Verify Ingress NGINX controller has an assigned external LoadBalancer hostname
 kubectl get svc -n ingress-nginx ingress-nginx-controller
 
-# Verify Ingress routing rule
+# Verify Ingress routing rule and rate limiting annotations
 kubectl get ingress demo-app
+kubectl get ingress demo-app -o jsonpath='{.metadata.annotations}'
+
+# Verify Zero-Trust NetworkPolicy isolation
+kubectl get networkpolicy -n default demo-app-ingress-only
+
+# Verify Ingress NGINX structured JSON access logs
+kubectl logs -n ingress-nginx -l app.kubernetes.io/name=ingress-nginx --tail=5
 ```
 
 #### 3. Test DNS Resolution and Public HTTPS Endpoints
@@ -431,13 +456,15 @@ terraform destroy -auto-approve
 
 ## Production Considerations
 
-| Topic | Demo Setting | Recommended Production Configuration |
+| Topic | Repository Default | Enterprise Recommendations |
 | :--- | :--- | :--- |
+| **Ingress High Availability** | 2 replicas, `minAvailable: 1` PDB, multi-AZ spread | Scale to 3+ replicas across 3 availability zones for high-throughput enterprise workloads. |
+| **Zero-Trust Network Isolation** | Ingress restricted to `ingress-nginx` via NetworkPolicy | Add Calico or AWS VPC CNI egress policies to prevent unauthorized outbound connections. |
+| **Layer 7 Rate Limiting** | 50 rps, 20 connections, 10MB payload | Adjust thresholds in `kubernetes_ingress_v1.app` per API endpoint SLA requirements. |
+| **Observability** | Structured JSON access logs with upstream latency metrics | Route container logs to Amazon CloudWatch Container Insights or AWS OpenSearch via FluentBit. |
+| **ACM TLS Certificates** | Subdomain (`app.alpfrtech.com`), apex (`alpfrtech.com`), and wildcard (`*.alpfrtech.com`) | Configure automated Route 53 DNS failover or CloudFront CDN edge distribution. |
+| **ECR Image Security** | Automated CVE scan on push, 14-day untagged prune, 10 tagged image retention | Integrate AWS Inspector continuous container vulnerability scanning and signing with Cosign. |
 | **NAT Gateways** | `single_nat_gateway = true` (Cost-optimized) | Set `single_nat_gateway = false` and `one_nat_gateway_per_az = true` for high availability across AZs. |
-| **Zone Apex Routing** | Subdomain CNAME (`app.alpfrtech.com`) | For root/apex domains (`alpfrtech.com`), create an **Alias `A` record** targeting the NLB hosted zone ID and DNS name. |
-| **Ingress Controller** | Single controller replica | Scale Ingress NGINX controller deployments to `replicas: 3+` with Pod Disruption Budgets (`PDB`) and pod anti-affinity. |
-| **DDoS / WAF** | Direct NLB exposure | Associate an **AWS WAFv2 Web ACL** with the Load Balancer or CloudFront distribution for managed rate-limiting and OWASP protection. |
-| **Chart Versioning** | `4.15.1` pinned | Maintain version pinning in `var.ingress_nginx_chart_version` and use Dependabot/Renovate for scheduled upgrades. |
 
 ---
 

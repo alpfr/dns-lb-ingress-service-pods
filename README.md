@@ -119,6 +119,10 @@ graph TD
 dns-lb-ingress-service-pods/
 ├── README.md                                  # Repository overview and primary documentation
 ├── .gitignore                                 # Git ignore patterns for Terraform, Python, and OS files
+├── scripts/                                   # Automated orchestration and operational scripts
+│   ├── deploy.sh                              # Complete end-to-end automated deployment suite
+│   ├── verify.sh                              # Post-deployment health checks and smoke testing
+│   └── destroy.sh                             # Safe infrastructure teardown and resource cleanup
 └── eks-nlb-acm-route53-demo/
     ├── README.md                              # Sub-module operational guide
     ├── bootstrap/                             # Terraform S3 backend storage module
@@ -141,7 +145,37 @@ dns-lb-ingress-service-pods/
 
 ---
 
-## Step-by-Step Deployment Guide
+## Quick Start: Automated Deployment
+
+You can deploy the complete infrastructure and application using the automated orchestration suite in `scripts/`:
+
+```bash
+# 1. Clone or navigate to the repository
+cd dns-lb-ingress-service-pods
+
+# 2. Run the end-to-end deployment script (auto-provisions S3 state, ECR, Docker image, EKS, Ingress, DNS)
+./scripts/deploy.sh --domain yourdomain.com
+
+# Or with options:
+./scripts/deploy.sh \
+  --domain yourdomain.com \
+  --subdomain app \
+  --region us-east-1 \
+  --cluster demo-eks \
+  --auto-approve
+```
+
+### Operational Scripts Reference
+
+| Script | Purpose | Example Command |
+| :--- | :--- | :--- |
+| **`scripts/deploy.sh`** | Full end-to-end automation: bootstrap S3 state bucket, create ECR repo, build & push image, configure backend/tfvars, apply Terraform, and verify | `./scripts/deploy.sh -d yourdomain.com -y` |
+| **`scripts/verify.sh`** | Runs cluster connectivity, node status, Ingress controller NLB status, and probes `/healthz` and `/` endpoints | `./scripts/verify.sh -d yourdomain.com` |
+| **`scripts/destroy.sh`** | Safely tears down the EKS cluster, NLB, Route 53 records, with options to delete ECR image repo and S3 state bucket | `./scripts/destroy.sh -y --delete-ecr` |
+
+---
+
+## Manual Step-by-Step Deployment Guide
 
 ### Prerequisites
 Before proceeding, verify that your local development workstation has:

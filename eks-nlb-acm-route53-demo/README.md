@@ -73,7 +73,24 @@ eks-nlb-acm-route53-demo/
 
 ---
 
-## Complete Deployment Instructions
+## Quick Start (Automated Scripts)
+
+For end-to-end automated deployment without manual execution:
+
+```bash
+# From the repository root:
+./scripts/deploy.sh --domain example.com -y
+
+# Verify health probes:
+./scripts/verify.sh --domain example.com
+
+# Teardown:
+./scripts/destroy.sh
+```
+
+---
+
+## Complete Deployment Instructions (Manual Walkthrough)
 
 ### Prerequisites Check
 Before executing, ensure you have:

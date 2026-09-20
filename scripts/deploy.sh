@@ -55,7 +55,9 @@ APP_DIR="${DEMO_DIR}/app"
 AWS_REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
 CLUSTER_NAME="demo-eks"
 DOMAIN_NAME="alpfrtech.com"
+DOMAIN_PROVIDED=false
 APP_SUBDOMAIN="app"
+APP_SUBDOMAIN_PROVIDED=false
 IMAGE_TAG="v1"
 SKIP_BOOTSTRAP=false
 SKIP_BUILD=false
@@ -93,10 +95,12 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         -d|--domain)
             DOMAIN_NAME="$2"
+            DOMAIN_PROVIDED=true
             shift 2
             ;;
         -s|--subdomain)
             APP_SUBDOMAIN="$2"
+            APP_SUBDOMAIN_PROVIDED=true
             shift 2
             ;;
         -r|--region)
@@ -138,11 +142,20 @@ while [[ $# -gt 0 ]]; do
 done
 
 # If DOMAIN_NAME was not passed as a flag, check if it exists in terraform.tfvars
-if [[ -f "${INFRA_DIR}/terraform.tfvars" ]]; then
-    EXTRACTED_DOMAIN=$(grep -E '^\s*domain_name\s*=' "${INFRA_DIR}/terraform.tfvars" | sed -E 's/.*=\s*"([^"]+)".*/\1/' || true)
-    if [[ -n "$EXTRACTED_DOMAIN" ]]; then
-        DOMAIN_NAME="$EXTRACTED_DOMAIN"
+if [[ "$DOMAIN_PROVIDED" == false && -f "${INFRA_DIR}/terraform.tfvars" ]]; then
+    RAW_DOMAIN=$(grep -E '^\s*domain_name\s*=' "${INFRA_DIR}/terraform.tfvars" | head -n 1 | awk -F'=' '{print $2}' | tr -d ' "' || true)
+    if [[ -n "$RAW_DOMAIN" && "$RAW_DOMAIN" =~ ^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
+        DOMAIN_NAME="$RAW_DOMAIN"
         print_success "Using domain_name from terraform.tfvars: ${DOMAIN_NAME}"
+    else
+        print_warning "No valid domain_name in terraform.tfvars; defaulting to: ${DOMAIN_NAME}"
+    fi
+fi
+
+if [[ "$APP_SUBDOMAIN_PROVIDED" == false && -f "${INFRA_DIR}/terraform.tfvars" ]]; then
+    EXTRACTED_SUB=$(grep -E '^\s*app_subdomain\s*=' "${INFRA_DIR}/terraform.tfvars" | head -n 1 | awk -F'=' '{print $2}' | tr -d ' "' || true)
+    if [[ -n "$EXTRACTED_SUB" && "$EXTRACTED_SUB" =~ ^[a-zA-Z0-9-]+$ ]]; then
+        APP_SUBDOMAIN="$EXTRACTED_SUB"
     fi
 fi
 

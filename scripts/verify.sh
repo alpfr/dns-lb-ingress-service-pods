@@ -19,7 +19,9 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 INFRA_DIR="${ROOT_DIR}/eks-nlb-acm-route53-demo/infra"
 
 DOMAIN_NAME="alpfrtech.com"
+DOMAIN_PROVIDED=false
 APP_SUBDOMAIN="app"
+APP_SUBDOMAIN_PROVIDED=false
 
 usage() {
     cat <<EOF
@@ -44,10 +46,12 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         -d|--domain)
             DOMAIN_NAME="$2"
+            DOMAIN_PROVIDED=true
             shift 2
             ;;
         -s|--subdomain)
             APP_SUBDOMAIN="$2"
+            APP_SUBDOMAIN_PROVIDED=true
             shift 2
             ;;
         -h|--help)
@@ -60,12 +64,19 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Try reading from terraform.tfvars if domain not passed
-if [[ -z "$DOMAIN_NAME" && -f "${INFRA_DIR}/terraform.tfvars" ]]; then
-    DOMAIN_NAME=$(grep -E '^\s*domain_name\s*=' "${INFRA_DIR}/terraform.tfvars" | sed -E 's/.*=\s*"([^"]+)".*/\1/' || true)
-    EXTRACTED_SUB=$(grep -E '^\s*app_subdomain\s*=' "${INFRA_DIR}/terraform.tfvars" | sed -E 's/.*=\s*"([^"]+)".*/\1/' || true)
-    if [[ -n "$EXTRACTED_SUB" ]]; then
-        APP_SUBDOMAIN="$EXTRACTED_SUB"
+# Try reading from terraform.tfvars if domain or subdomain not passed via CLI
+if [[ -f "${INFRA_DIR}/terraform.tfvars" ]]; then
+    if [[ "$DOMAIN_PROVIDED" == false ]]; then
+        RAW_DOMAIN=$(grep -E '^\s*domain_name\s*=' "${INFRA_DIR}/terraform.tfvars" | head -n 1 | awk -F'=' '{print $2}' | tr -d ' "' || true)
+        if [[ -n "$RAW_DOMAIN" && "$RAW_DOMAIN" =~ ^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
+            DOMAIN_NAME="$RAW_DOMAIN"
+        fi
+    fi
+    if [[ "$APP_SUBDOMAIN_PROVIDED" == false ]]; then
+        EXTRACTED_SUB=$(grep -E '^\s*app_subdomain\s*=' "${INFRA_DIR}/terraform.tfvars" | head -n 1 | awk -F'=' '{print $2}' | tr -d ' "' || true)
+        if [[ -n "$EXTRACTED_SUB" && "$EXTRACTED_SUB" =~ ^[a-zA-Z0-9-]+$ ]]; then
+            APP_SUBDOMAIN="$EXTRACTED_SUB"
+        fi
     fi
 fi
 

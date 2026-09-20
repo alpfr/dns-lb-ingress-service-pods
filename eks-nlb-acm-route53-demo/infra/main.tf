@@ -471,6 +471,8 @@ resource "kubernetes_service_v1" "app" {
 
     type = "ClusterIP"
   }
+
+  depends_on = [module.eks]
 }
 
 resource "kubernetes_ingress_v1" "app" {
@@ -508,5 +510,8 @@ resource "kubernetes_ingress_v1" "app" {
     }
   }
 
-  depends_on = [helm_release.ingress_nginx]
+  depends_on = [
+    helm_release.ingress_nginx,
+    kubernetes_service_v1.app
+  ]
 }

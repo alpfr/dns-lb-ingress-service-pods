@@ -203,12 +203,21 @@ dns-lb-ingress-service-pods/
     │   ├── outputs.tf                         # Application URL, cluster endpoint, NLB hostname
     │   ├── versions.tf                        # Provider requirements (aws, kubernetes, helm, time)
     │   ├── backend.tf.example                 # Template for remote S3 state configuration
-    │   └── terraform.tfvars.example           # Template for environment-specific input variables
-    └── app/                                   # Containerized Python Flask microservice
-        ├── app.py                             # Application source code with / and /healthz endpoints
+    └── app/                                   # ClauseGuard AI - Intelligent Contract Risk SaaS
+        ├── app.py                             # FastAPI server & route handlers (/api/analyze, /api/chat, /healthz)
         ├── Dockerfile                         # Multi-stage, non-root hardened container image
-        ├── requirements.txt                   # Flask and Gunicorn runtime dependencies
-        └── .dockerignore                      # Build context ignore rules
+        ├── requirements.txt                   # FastAPI, Uvicorn, Gunicorn, PyPDF, Pydantic dependencies
+        ├── .dockerignore                      # Build context ignore rules
+        ├── services/                          # Modular AI and document processing engines
+        │   ├── __init__.py
+        │   ├── analyzer.py                    # Dual-engine contract risk scoring and red-flag audit
+        │   ├── chat_assistant.py              # Context-grounded conversational Q&A assistant
+        │   ├── document_parser.py             # Multi-page PDF, text, and markdown parser
+        │   └── sample_contracts.py            # Pre-packaged real-world contracts for 1-click demos
+        └── static/                            # Modern single-page web application frontend
+            ├── index.html                     # Responsive dashboard with SVG risk gauge and chat
+            ├── css/styles.css                 # Dark mode, glassmorphism design system & micro-animations
+            └── js/app.js                      # Client-side file dropzone, live radial gauge, and chat engine
 ```
 
 ---

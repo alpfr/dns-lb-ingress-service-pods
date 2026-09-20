@@ -18,7 +18,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 INFRA_DIR="${ROOT_DIR}/eks-nlb-acm-route53-demo/infra"
 
-DOMAIN_NAME=""
+DOMAIN_NAME="alpfr.com"
 APP_SUBDOMAIN="app"
 
 usage() {
@@ -28,13 +28,14 @@ Usage: $(basename "$0") [OPTIONS]
 Performs cluster, ingress, pod, and HTTP endpoint health checks.
 
 Options:
-  -d, --domain DOMAIN       Route 53 public domain (e.g. example.com)
+  -d, --domain DOMAIN       Route 53 public domain (default: alpfr.com)
   -s, --subdomain SUB       Subdomain prefix (default: app)
   -h, --help                Show this help message and exit
 
 Examples:
-  $(basename "$0") --domain example.com
-  $(basename "$0") -d example.com -s myapp
+  $(basename "$0")
+  $(basename "$0") --domain alpfr.com
+  $(basename "$0") -d alpfr.com -s app
 EOF
     exit 0
 }

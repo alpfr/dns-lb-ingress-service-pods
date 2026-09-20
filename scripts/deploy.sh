@@ -54,7 +54,7 @@ APP_DIR="${DEMO_DIR}/app"
 # ------------------------------------------------------------------------------
 AWS_REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
 CLUSTER_NAME="demo-eks"
-DOMAIN_NAME=""
+DOMAIN_NAME="alpfr.com"
 APP_SUBDOMAIN="app"
 IMAGE_TAG="v1"
 SKIP_BOOTSTRAP=false
@@ -69,7 +69,7 @@ Automates the provisioning of EKS Auto Mode, S3 state backend, ECR repository,
 container build & push, Ingress NGINX with NLB TLS termination, and Route 53 DNS.
 
 Options:
-  -d, --domain DOMAIN       Route 53 public hosted zone name (e.g., example.com) [REQUIRED]
+  -d, --domain DOMAIN       Route 53 public hosted zone name (default: alpfr.com)
   -s, --subdomain SUB       Subdomain prefix for application (default: app)
   -r, --region REGION       AWS region (default: us-east-1 or \$AWS_REGION)
   -c, --cluster NAME        EKS cluster name (default: demo-eks)
@@ -80,8 +80,9 @@ Options:
   -h, --help                Show this help message and exit
 
 Examples:
-  $(basename "$0") --domain example.com
-  $(basename "$0") -d example.com -s myapp -r us-west-2 -y
+  $(basename "$0")
+  $(basename "$0") --domain alpfr.com
+  $(basename "$0") -d alpfr.com -s app -r us-east-1 -y
 EOF
     exit 0
 }
@@ -131,9 +132,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 # If DOMAIN_NAME was not passed as a flag, check if it exists in terraform.tfvars
-if [[ -z "$DOMAIN_NAME" && -f "${INFRA_DIR}/terraform.tfvars" ]]; then
+if [[ -f "${INFRA_DIR}/terraform.tfvars" ]]; then
     EXTRACTED_DOMAIN=$(grep -E '^\s*domain_name\s*=' "${INFRA_DIR}/terraform.tfvars" | sed -E 's/.*=\s*"([^"]+)".*/\1/' || true)
-    if [[ -n "$EXTRACTED_DOMAIN" && "$EXTRACTED_DOMAIN" != "example.com" ]]; then
+    if [[ -n "$EXTRACTED_DOMAIN" ]]; then
         DOMAIN_NAME="$EXTRACTED_DOMAIN"
         print_success "Using domain_name from terraform.tfvars: ${DOMAIN_NAME}"
     fi

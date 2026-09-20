@@ -15,7 +15,7 @@ This module contains the complete, production-ready implementation of an **Amazo
        │
        │  HTTPS (443) / TLS
        ▼
-[Amazon Route 53 Public Hosted Zone] (CNAME: app.example.com -> NLB DNS)
+[Amazon Route 53 Public Hosted Zone] (CNAME: app.alpfr.com -> NLB DNS)
        │
        ▼
 [AWS Network Load Balancer] (TLS Terminated with ACM Public Certificate)
@@ -82,10 +82,10 @@ For end-to-end automated deployment without manual execution:
 
 ```bash
 # From the repository root:
-./scripts/deploy.sh --domain example.com -y
+./scripts/deploy.sh --domain alpfr.com -y
 
 # Verify health probes:
-./scripts/verify.sh --domain example.com
+./scripts/verify.sh --domain alpfr.com
 
 # Teardown:
 ./scripts/destroy.sh
@@ -101,7 +101,7 @@ Before executing, ensure you have:
 2. **Terraform** (`>= 1.10.0`) installed (`terraform -version`).
 3. **Docker** running (`docker info`).
 4. **kubectl** installed (`kubectl version --client`).
-5. An active **Public Route 53 Hosted Zone** (e.g., `example.com`).
+5. An active **Public Route 53 Hosted Zone** (e.g., `alpfr.com`).
 
 ---
 
@@ -162,8 +162,8 @@ Update `terraform.tfvars`:
 ```hcl
 aws_region                  = "us-east-1"
 cluster_name                = "demo-eks"
-domain_name                 = "example.com"      # Your Route 53 domain
-app_subdomain               = "app"              # Yields app.example.com
+domain_name                 = "alpfr.com"        # Your Route 53 domain
+app_subdomain               = "app"              # Yields app.alpfr.com
 app_image                   = "<ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/demo-app:v1"
 ingress_nginx_chart_version = "4.15.1"
 tags = {
@@ -194,8 +194,8 @@ aws eks update-kubeconfig --region us-east-1 --name demo-eks
 kubectl get pods,svc,ingress -A
 
 # Test the public HTTPS endpoints
-curl -i https://app.example.com/healthz
-curl -i https://app.example.com/
+curl -i https://app.alpfr.com/healthz
+curl -i https://app.alpfr.com/
 ```
 
 ---

@@ -12,7 +12,8 @@ variable "cluster_name" {
 
 variable "domain_name" {
   type        = string
-  description = "Existing Route53 public hosted zone (e.g. example.com)"
+  description = "Existing Route53 public hosted zone (e.g. alpfr.com)"
+  default     = "alpfr.com"
 }
 
 variable "app_subdomain" {

@@ -21,13 +21,13 @@ A production-grade, enterprise-hardened Terraform starter demonstrating automate
           │
           │ HTTPS (443) / TLS
           ▼
-   [Amazon Route 53] ── (DNS: app.yourdomain.com -> NLB DNS Name | CAA: amazon.com)
+   [Amazon Route 53] ── (DNS: app.alpfr.com -> NLB DNS Name | CAA: amazon.com)
           │
           ▼
  ┌─────────────────────────────────────────────────────────────────────────────────────────────────┐
  │ AWS Network Load Balancer (Internet-Facing NLB)                                                 │
  │                                                                                                 │
- │   • TLS Termination: ACM Public Certificate (*.yourdomain.com / app.yourdomain.com)             │
+ │   • TLS Termination: ACM Public Certificate (*.alpfr.com / app.alpfr.com)                       │
  │   • Target Type: IP (Direct Pod Routing / Cross-Zone Load Balancing)                            │
  │   • Dedicated HTTP Health Probe: /healthz on port 10254                                         │
  │   • Protocol to Ingress: Plain TCP / HTTP on Port 80                                            │
@@ -180,11 +180,11 @@ You can deploy the complete infrastructure and application using the automated o
 cd dns-lb-ingress-service-pods
 
 # 2. Run the end-to-end deployment script (auto-provisions S3 state, ECR, Docker image, EKS, Ingress, DNS)
-./scripts/deploy.sh --domain yourdomain.com
+./scripts/deploy.sh --domain alpfr.com
 
 # Or with options:
 ./scripts/deploy.sh \
-  --domain yourdomain.com \
+  --domain alpfr.com \
   --subdomain app \
   --region us-east-1 \
   --cluster demo-eks \
@@ -195,8 +195,8 @@ cd dns-lb-ingress-service-pods
 
 | Script | Purpose | Example Command |
 | :--- | :--- | :--- |
-| **`scripts/deploy.sh`** | Full end-to-end automation: bootstrap S3 state bucket, create ECR repo, build & push image, configure backend/tfvars, apply Terraform, and verify | `./scripts/deploy.sh -d yourdomain.com -y` |
-| **`scripts/verify.sh`** | Runs cluster connectivity, node status, Ingress controller NLB status, and probes `/healthz` and `/` endpoints | `./scripts/verify.sh -d yourdomain.com` |
+| **`scripts/deploy.sh`** | Full end-to-end automation: bootstrap S3 state bucket, create ECR repo, build & push image, configure backend/tfvars, apply Terraform, and verify | `./scripts/deploy.sh -d alpfr.com -y` |
+| **`scripts/verify.sh`** | Runs cluster connectivity, node status, Ingress controller NLB status, and probes `/healthz` and `/` endpoints | `./scripts/verify.sh -d alpfr.com` |
 | **`scripts/destroy.sh`** | Safely tears down the EKS cluster, NLB, Route 53 records, with options to delete ECR image repo and S3 state bucket | `./scripts/destroy.sh -y --delete-ecr` |
 
 ---
@@ -221,7 +221,7 @@ Before proceeding, verify that your local development workstation has:
    ```bash
    kubectl version --client
    ```
-5. An existing **Public Route 53 Hosted Zone** registered in your AWS account (e.g., `example.com`).
+5. An existing **Public Route 53 Hosted Zone** registered in your AWS account (e.g., `alpfr.com`).
 
 ---
 
@@ -306,8 +306,8 @@ Update `terraform.tfvars` with your specific domain name and ECR image URI:
 ```hcl
 aws_region                  = "us-east-1"
 cluster_name                = "demo-eks"
-domain_name                 = "example.com"      # Replace with your Route 53 public hosted zone
-app_subdomain               = "app"              # Yields https://app.example.com
+domain_name                 = "alpfr.com"      # Replace with your Route 53 public hosted zone
+app_subdomain               = "app"              # Yields https://app.alpfr.com
 app_image                   = "<ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/demo-app:v1"
 ingress_nginx_chart_version = "4.15.1"
 tags = {
@@ -362,7 +362,7 @@ kubectl get ingress demo-app
 #### 3. Test DNS Resolution and Public HTTPS Endpoints
 ```bash
 # Query the live application health probe
-curl -i https://app.example.com/healthz
+curl -i https://app.alpfr.com/healthz
 
 # Expected Response:
 # HTTP/2 200
@@ -370,7 +370,7 @@ curl -i https://app.example.com/healthz
 # {"status":"ok"}
 
 # Query the root endpoint
-curl -i https://app.example.com/
+curl -i https://app.alpfr.com/
 
 # Expected Response:
 # HTTP/2 200
@@ -407,7 +407,7 @@ terraform destroy -auto-approve
 | Topic | Demo Setting | Recommended Production Configuration |
 | :--- | :--- | :--- |
 | **NAT Gateways** | `single_nat_gateway = true` (Cost-optimized) | Set `single_nat_gateway = false` and `one_nat_gateway_per_az = true` for high availability across AZs. |
-| **Zone Apex Routing** | Subdomain CNAME (`app.example.com`) | For root/apex domains (`example.com`), create an **Alias `A` record** targeting the NLB hosted zone ID and DNS name. |
+| **Zone Apex Routing** | Subdomain CNAME (`app.alpfr.com`) | For root/apex domains (`alpfr.com`), create an **Alias `A` record** targeting the NLB hosted zone ID and DNS name. |
 | **Ingress Controller** | Single controller replica | Scale Ingress NGINX controller deployments to `replicas: 3+` with Pod Disruption Budgets (`PDB`) and pod anti-affinity. |
 | **DDoS / WAF** | Direct NLB exposure | Associate an **AWS WAFv2 Web ACL** with the Load Balancer or CloudFront distribution for managed rate-limiting and OWASP protection. |
 | **Chart Versioning** | `4.15.1` pinned | Maintain version pinning in `var.ingress_nginx_chart_version` and use Dependabot/Renovate for scheduled upgrades. |
@@ -419,7 +419,7 @@ terraform destroy -auto-approve
 | Issue | Root Cause | Resolution |
 | :--- | :--- | :--- |
 | **Browser: `ERR_TOO_MANY_REDIRECTS`** | Ingress controller enforces SSL redirect while receiving plain HTTP from the NLB. | Verify `nginx.ingress.kubernetes.io/ssl-redirect: "false"` is set on `kubernetes_ingress_v1.app`. |
-| **ACM Validation Pending** | Route 53 DNS record does not match ACM challenge string or nameservers are inactive. | Inspect Route 53 hosted zone NS records with `dig NS yourdomain.com` to ensure public delegation is active. |
+| **ACM Validation Pending** | Route 53 DNS record does not match ACM challenge string or nameservers are inactive. | Inspect Route 53 hosted zone NS records with `dig NS alpfr.com` to ensure public delegation is active. |
 | **Terraform Plan: Status Hostname Empty** | NLB was queried before AWS assigned a public DNS name. | Ensure `time_sleep.wait_for_ingress_lb` (45s) is declared as a dependency before `data.kubernetes_service_v1.ingress`. |
 | **`401 Unauthorized` during apply** | Static EKS token expired during long cluster creation. | Ensure `kubernetes` and `helm` providers use dynamic `exec` authentication (`aws eks get-token`). |
 | **`ImagePullBackOff` on Pods** | ECR repository does not exist, container image was not pushed, or IAM role lacks ECR pull permissions. | Verify image was pushed using `aws ecr list-images --repository-name demo-app` and tag matches `app_image`. |

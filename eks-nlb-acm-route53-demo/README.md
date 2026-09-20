@@ -48,6 +48,7 @@ This module contains the complete, production-ready implementation of an **Amazo
   - **Route 53 CAA Record**: Restricts public certificate issuance strictly to `amazon.com`.
   - **S3 State Storage**: Enforces `BucketOwnerEnforced`, encryption, versioning, public access blocks, and native S3 state locking.
 - **Dynamic Provider Authentication**: The `kubernetes` and `helm` Terraform providers use `aws eks get-token` via dynamic `exec` blocks, avoiding the 15-minute token expiration issue during long cluster creation runs.
+- **Access Entry & RBAC Hardening**: Explicit `depends_on` relationships prevent race conditions between newly attached `AmazonEKSClusterAdminPolicy` access entries and Kubernetes service/ingress manifest application.
 - **Network & WSGI Tuning**: Gunicorn uses `--keep-alive 65` (exceeding the NLB 60s idle timeout) with 2 workers and 2 threads.
 
 ---

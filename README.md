@@ -134,6 +134,15 @@ graph TD
 ### 8. Automated CI/CD Governance Pipeline
 - A GitHub Actions workflow ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) automatically runs on all pushes and PRs to `main`, validating Terraform formatting and syntax, Python bytecode compilation, Flake8 style compliance, shell script syntax (`bash -n`), and container image builds.
 
+### 9. Existing VPC Auto-Discovery & Zero-Impact Reusability
+- Supports deploying directly into pre-existing VPCs in `us-east-1` (such as existing cluster VPCs) with automatic private/public subnet discovery.
+- The deployment script queries AWS, ranks healthy VPCs possessing active Internet Gateways and NAT Gateways, and allows selecting via CLI flag (`--vpc-id <id>`) or interactive menu.
+- Teardown via `scripts/destroy.sh` safely preserves existing VPCs and subnets, only destroying Terraform-managed workloads and DNS entries.
+
+### 10. EKS Access Entry Propagation & RBAC Dependency Hardening
+- Hardens Kubernetes resource dependencies (`depends_on = [module.eks]`) against control-plane auth cache propagation delays for newly attached `AmazonEKSClusterAdminPolicy` access entries.
+- Added automatic secondary reconciliation apply in `scripts/deploy.sh` to ensure completely hands-off execution without transient failures.
+
 ---
 
 ## Repository Layout

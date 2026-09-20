@@ -425,10 +425,12 @@ echo "Planning infrastructure changes..."
 terraform plan -out=tfplan
 
 echo -e "\n${BOLD}${YELLOW}Applying infrastructure plan (EKS creation takes ~12-15 minutes)...${NC}"
-if [[ "$AUTO_APPROVE" == true ]]; then
-    terraform apply -auto-approve tfplan
-else
-    terraform apply tfplan
+if ! terraform apply $APPROVAL_FLAG tfplan; then
+    print_warning "Terraform apply encountered a transient delay (e.g. IAM access policy propagation)."
+    echo "Updating kubeconfig and attempting reconciliation apply in 10s..."
+    aws eks update-kubeconfig --region "$AWS_REGION" --name "$CLUSTER_NAME" 2>/dev/null || true
+    sleep 10
+    terraform apply $APPROVAL_FLAG
 fi
 print_success "Infrastructure provisioned successfully"
 

@@ -115,6 +115,15 @@ resource "aws_acm_certificate_validation" "app" {
   validation_record_fqdns = [for r in aws_route53_record.validation : r.fqdn]
 }
 
+resource "aws_route53_record" "caa" {
+  zone_id         = data.aws_route53_zone.public.zone_id
+  name            = var.domain_name
+  type            = "CAA"
+  ttl             = 300
+  records         = ["0 issue \"amazon.com\"", "0 issuewild \"amazon.com\""]
+  allow_overwrite = true
+}
+
 resource "helm_release" "ingress_nginx" {
   name             = "ingress-nginx"
   namespace        = "ingress-nginx"
@@ -127,6 +136,21 @@ resource "helm_release" "ingress_nginx" {
 
   values = [yamlencode({
     controller = {
+      replicaCount = 2
+      minAvailable = 1
+      topologySpreadConstraints = [
+        {
+          maxSkew           = 1
+          topologyKey       = "topology.kubernetes.io/zone"
+          whenUnsatisfiable = "ScheduleAnyway"
+          labelSelector = {
+            matchLabels = {
+              "app.kubernetes.io/name"      = "ingress-nginx"
+              "app.kubernetes.io/component" = "controller"
+            }
+          }
+        }
+      ]
       service = {
         type = "LoadBalancer"
         annotations = {
@@ -137,6 +161,9 @@ resource "helm_release" "ingress_nginx" {
           "service.beta.kubernetes.io/aws-load-balancer-ssl-ports"                         = "https"
           "service.beta.kubernetes.io/aws-load-balancer-backend-protocol"                  = "tcp"
           "service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled" = "true"
+          "service.beta.kubernetes.io/aws-load-balancer-healthcheck-path"                  = "/healthz"
+          "service.beta.kubernetes.io/aws-load-balancer-healthcheck-port"                  = "10254"
+          "service.beta.kubernetes.io/aws-load-balancer-healthcheck-protocol"              = "HTTP"
         }
         targetPorts = {
           http  = "http"
@@ -145,6 +172,9 @@ resource "helm_release" "ingress_nginx" {
       }
       config = {
         "use-forwarded-headers" = "true"
+      }
+      metrics = {
+        enabled = true
       }
     }
   })]
@@ -205,6 +235,18 @@ resource "kubernetes_deployment_v1" "app" {
       }
 
       spec {
+        topology_spread_constraint {
+          max_skew           = 1
+          topology_key       = "topology.kubernetes.io/zone"
+          when_unsatisfiable = "ScheduleAnyway"
+
+          label_selector {
+            match_labels = {
+              app = "demo-app"
+            }
+          }
+        }
+
         security_context {
           run_as_non_root = true
           run_as_user     = 10001
@@ -260,11 +302,82 @@ resource "kubernetes_deployment_v1" "app" {
 
           security_context {
             allow_privilege_escalation = false
-            read_only_root_filesystem  = false
+            read_only_root_filesystem  = true
             capabilities {
               drop = ["ALL"]
             }
           }
+
+          volume_mount {
+            name       = "tmp-volume"
+            mount_path = "/tmp"
+          }
+        }
+
+        volume {
+          name = "tmp-volume"
+          empty_dir {}
+        }
+      }
+    }
+  }
+
+  depends_on = [module.eks]
+}
+
+resource "kubernetes_pod_disruption_budget_v1" "app" {
+  metadata {
+    name      = "demo-app"
+    namespace = "default"
+  }
+
+  spec {
+    min_available = "1"
+
+    selector {
+      match_labels = {
+        app = "demo-app"
+      }
+    }
+  }
+
+  depends_on = [module.eks]
+}
+
+resource "kubernetes_horizontal_pod_autoscaler_v2" "app" {
+  metadata {
+    name      = "demo-app"
+    namespace = "default"
+  }
+
+  spec {
+    min_replicas = 2
+    max_replicas = 10
+
+    scale_target_ref {
+      api_version = "apps/v1"
+      kind        = "Deployment"
+      name        = kubernetes_deployment_v1.app.metadata[0].name
+    }
+
+    metric {
+      type = "Resource"
+      resource {
+        name = "cpu"
+        target {
+          type                = "Utilization"
+          average_utilization = 70
+        }
+      }
+    }
+
+    metric {
+      type = "Resource"
+      resource {
+        name = "memory"
+        target {
+          type                = "Utilization"
+          average_utilization = 80
         }
       }
     }

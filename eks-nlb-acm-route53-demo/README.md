@@ -39,12 +39,15 @@ This module contains the complete, production-ready implementation of an **Amazo
 - **EKS Auto Mode**: Dynamically manages EC2 node pools (`general-purpose`) with automated node provisioning and scaling without requiring manual node group or Karpenter installations.
 - **SSL Termination at the NLB**: The AWS Network Load Balancer offloads TLS decryption using an ACM certificate validated via Route 53 DNS records.
 - **Redirect Loop Prevention**: Because traffic from the NLB arrives at Ingress NGINX as plain HTTP, `nginx.ingress.kubernetes.io/ssl-redirect` is explicitly set to `"false"`. The controller config enables `"use-forwarded-headers" = "true"`, preventing `308 Permanent Redirect` / `ERR_TOO_MANY_REDIRECTS` loops.
-- **Asynchronous NLB Ready Wait**: Integrates `time_sleep.wait_for_ingress_lb` (45 seconds), ensuring the NLB public DNS name is assigned by AWS before Route 53 CNAME record creation executes.
+- **High Availability Ingress Controller**: Deploys 2 controller replicas with a Pod Disruption Budget (`minAvailable: 1`), multi-zone topology spread constraints, and dedicated HTTP `/healthz` target health checks on port `10254`.
+- **Workload Resilience & Auto-scaling**: Deploys `demo-app` with Horizontal Pod Autoscaling (2–10 replicas), Pod Disruption Budget (`minAvailable: 1`), and zone topology spread constraints.
+- **Defense-in-Depth Security**:
+  - **Read-Only Root Filesystem**: Microservice pods run with `read_only_root_filesystem = true` and a dedicated `emptyDir` mount for `/tmp`.
+  - **Non-Root & Capability Drop**: Runs as UID `10001` with all Linux capabilities dropped and `RuntimeDefault` seccomp.
+  - **Route 53 CAA Record**: Restricts public certificate issuance strictly to `amazon.com`.
+  - **S3 State Storage**: Enforces `BucketOwnerEnforced`, encryption, versioning, public access blocks, and native S3 state locking.
 - **Dynamic Provider Authentication**: The `kubernetes` and `helm` Terraform providers use `aws eks get-token` via dynamic `exec` blocks, avoiding the 15-minute token expiration issue during long cluster creation runs.
-- **Enterprise Security Hardening**:
-  - **S3 State Storage**: S3 bucket enforces `BucketOwnerEnforced` object ownership (legacy ACLs disabled), AES-256 server-side encryption, versioning, and public access blocks. State locking uses native S3 locking (`use_lockfile = true`).
-  - **Pod Security**: Pods run as unprivileged user `appuser` (UID `10001`), drop all Linux capabilities (`drop = ["ALL"]`), and enforce `RuntimeDefault` seccomp profiles.
-  - **Network & WSGI Tuning**: Gunicorn uses `--keep-alive 65` (exceeding the NLB 60s idle timeout) with 2 workers and 2 threads.
+- **Network & WSGI Tuning**: Gunicorn uses `--keep-alive 65` (exceeding the NLB 60s idle timeout) with 2 workers and 2 threads.
 
 ---
 

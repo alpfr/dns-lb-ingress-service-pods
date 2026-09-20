@@ -1,5 +1,6 @@
 # AWS EKS Auto Mode + NLB + Ingress NGINX + ACM + Route 53
 
+[![CI Pipeline](https://github.com/alpfr/dns-lb-ingress-service-pods/actions/workflows/ci.yml/badge.svg)](https://github.com/alpfr/dns-lb-ingress-service-pods/actions/workflows/ci.yml)
 [![AWS](https://img.shields.io/badge/AWS-EKS%20Auto%20Mode-FF9900?logo=amazon-aws&logoColor=white)](https://aws.amazon.com/eks/)
 [![Terraform](https://img.shields.io/badge/Terraform-%3E%3D%201.10.0-844FBA?logo=terraform&logoColor=white)](https://www.terraform.io/)
 [![NGINX](https://img.shields.io/badge/Ingress-NGINX%20Controller-009639?logo=nginx&logoColor=white)](https://kubernetes.github.io/ingress-nginx/)
@@ -20,7 +21,7 @@ A production-grade, enterprise-hardened Terraform starter demonstrating automate
           │
           │ HTTPS (443) / TLS
           ▼
-   [Amazon Route 53] ── (DNS Resolution: app.yourdomain.com -> NLB DNS Name)
+   [Amazon Route 53] ── (DNS: app.yourdomain.com -> NLB DNS Name | CAA: amazon.com)
           │
           ▼
  ┌─────────────────────────────────────────────────────────────────────────────────────────────────┐
@@ -28,6 +29,7 @@ A production-grade, enterprise-hardened Terraform starter demonstrating automate
  │                                                                                                 │
  │   • TLS Termination: ACM Public Certificate (*.yourdomain.com / app.yourdomain.com)             │
  │   • Target Type: IP (Direct Pod Routing / Cross-Zone Load Balancing)                            │
+ │   • Dedicated HTTP Health Probe: /healthz on port 10254                                         │
  │   • Protocol to Ingress: Plain TCP / HTTP on Port 80                                            │
  └───────────────────────────────────────────────────┬─────────────────────────────────────────────┘
                                                      │
@@ -38,11 +40,13 @@ A production-grade, enterprise-hardened Terraform starter demonstrating automate
  │                                                                                                 │
  │   Namespace: ingress-nginx                                                                      │
  │   ┌─────────────────────────────────────────────────────────────────────────────────────────┐   │
- │   │ Ingress NGINX Controller Pods                                                           │   │
+ │   │ Ingress NGINX Controller Pods (Replicas: 2 | PDB: minAvailable 1)                       │   │
  │   │                                                                                         │   │
+ │   │   • Multi-AZ Topology Spread (topology.kubernetes.io/zone)                              │   │
  │   │   • Host-Based & Path-Based Layer 7 Routing                                             │   │
  │   │   • ssl-redirect: "false" (Prevents ERR_TOO_MANY_REDIRECTS loop)                        │   │
  │   │   • use-forwarded-headers: "true" (Preserves client IP & X-Forwarded-Proto)             │   │
+ │   │   • Prometheus Metrics Enabled on port 10254                                            │   │
  │   └─────────────────────────────────────────────┬───────────────────────────────────────────┘   │
  │                                                 │                                               │
  │                                                 │ ClusterIP (Port 80)                           │
@@ -56,11 +60,14 @@ A production-grade, enterprise-hardened Terraform starter demonstrating automate
  │                                                 │ TargetPort (8080)                             │
  │                                                 ▼                                               │
  │   ┌─────────────────────────────────────────────────────────────────────────────────────────┐   │
- │   │ Flask Microservice Pods (Gunicorn WSGI)                                                 │   │
+ │   │ Flask Microservice Pods (HPA: 2-10 replicas | PDB: minAvailable 1)                      │   │
  │   │                                                                                         │   │
+ │   │   • Multi-AZ Topology Spread (topology.kubernetes.io/zone)                              │   │
  │   │   • Non-Root Execution (UID 10001, GID 10001)                                           │   │
  │   │   • Linux Capabilities: ALL dropped                                                     │   │
+ │   │   • Read-Only Root Filesystem (with /tmp emptyDir)                                      │   │
  │   │   • Seccomp Profile: RuntimeDefault                                                     │   │
+ │   │   • Horizontal Pod Autoscaler: CPU 70%, Memory 80%                                      │   │
  │   │   • HTTP Endpoints: / (Root JSON status), /healthz (Liveness & Readiness probe)         │   │
  │   └─────────────────────────────────────────────────────────────────────────────────────────┘   │
  └─────────────────────────────────────────────────────────────────────────────────────────────────┘
@@ -74,12 +81,15 @@ graph TD
     R53 -->|CNAME / Alias| NLB[AWS Network Load Balancer]
     subgraph AWS Network Load Balancer
         ACM[ACM Certificate] -.->|Decrypts TLS| NLB
+        Probe[Health Probe :10254 /healthz] -.->|Direct HTTP Probe| NGINX
     end
-    NLB -->|Plain HTTP :80| NGINX[NGINX Ingress Controller]
+    NLB -->|Plain HTTP :80| NGINX[NGINX Ingress Controller - 2 Replicas, PDB]
     subgraph EKS Auto Mode Cluster
         NGINX -->|Route Host/Path| Svc[Kubernetes Service: demo-app]
-        Svc -->|Port 8080| Pod1[demo-app Pod 1]
-        Svc -->|Port 8080| Pod2[demo-app Pod 2]
+        Svc -->|Port 8080| Pod1[demo-app Pod 1 - Zone A]
+        Svc -->|Port 8080| Pod2[demo-app Pod 2 - Zone B]
+        HPA[HPA 2-10 Replicas] -.->|Autoscales| Pod1
+        HPA -.->|Autoscales| Pod2
     end
 ```
 
@@ -106,10 +116,23 @@ graph TD
 - **The Challenge**: Using `data "aws_eks_cluster_auth"` injects a static authentication token into the Terraform state that expires in 15 minutes. VPC and EKS cluster creation often takes 12–18 minutes, resulting in `401 Unauthorized` errors when Terraform attempts to apply Kubernetes and Helm resources.
 - **The Solution**: The `kubernetes` and `helm` providers use dynamic client authentication via `aws eks get-token` in their `exec` blocks, generating a fresh, valid token for every single API request.
 
-### 5. CIS & Production Security Hardening
-- **S3 Remote State Storage**: The bootstrap module enforces `BucketOwnerEnforced` (disabling legacy S3 ACLs), AES-256 server-side encryption, versioning, and complete public access blocking. Native Terraform 1.10+ state locking (`use_lockfile = true`) is used without needing DynamoDB.
-- **Pod Hardening**: Microservice pods run as unprivileged user `appuser` (UID `10001`), drop all Linux capabilities (`drop = ["ALL"]`), enforce `RuntimeDefault` seccomp profiles, and disallow privilege escalation.
-- **Network Tuning**: Gunicorn is configured with `--keep-alive 65`, `--workers 2`, and `--threads 2` to safely exceed the NLB idle connection timeout (60s) and prevent race-condition `502 Bad Gateway` errors.
+### 5. Multi-AZ Ingress High Availability & Native Health Probes
+- **Ingress Controller Redundancy**: Configured with `replicaCount: 2`, `minAvailable: 1` Pod Disruption Budget, and `topologySpreadConstraints` ensuring controller pods are scheduled across distinct Availability Zones.
+- **Dedicated NLB Health Check**: NLB targets are checked via native HTTP `GET /healthz` on port `10254` rather than generic TCP connection checks, preventing traffic routing to unready ingress controllers.
+- **Prometheus Metrics**: Controller metrics are enabled out-of-the-box on port `10254` for integration with Prometheus, Datadog, or CloudWatch Container Insights.
+
+### 6. Workload Auto-scaling & Disruption Resilience
+- **Horizontal Pod Autoscaling (HPA)**: Dynamically scales `demo-app` pods between 2 and 10 replicas based on 70% CPU and 80% Memory thresholds.
+- **Pod Disruption Budget (PDB)**: Enforces `min_available = 1` during EKS automated node recycling and rolling updates.
+- **Topology Spread**: Distributes workload pods across zones (`topology.kubernetes.io/zone`) to guarantee fault tolerance against AZ outages.
+
+### 7. Defense-in-Depth Container & State Security
+- **S3 State Storage**: Bootstrap module enforces `BucketOwnerEnforced` (legacy ACLs disabled), AES-256 encryption, versioning, public access blocks, and native S3 state locking (`use_lockfile = true`).
+- **Read-Only Root Filesystem**: Application container enforces `read_only_root_filesystem = true`, runs as UID `10001`, drops all Linux capabilities (`drop = ["ALL"]`), and mounts an ephemeral `emptyDir` on `/tmp`.
+- **DNS CAA Record**: Route 53 includes a Certification Authority Authorization (CAA) record explicitly restricting TLS certificate issuance to `amazon.com`.
+
+### 8. Automated CI/CD Governance Pipeline
+- A GitHub Actions workflow ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) automatically runs on all pushes and PRs to `main`, validating Terraform formatting and syntax, Python bytecode compilation, Flake8 style compliance, shell script syntax (`bash -n`), and container image builds.
 
 ---
 
@@ -119,6 +142,9 @@ graph TD
 dns-lb-ingress-service-pods/
 ├── README.md                                  # Repository overview and primary documentation
 ├── .gitignore                                 # Git ignore patterns for Terraform, Python, and OS files
+├── .github/
+│   └── workflows/
+│       └── ci.yml                             # Automated GitHub Actions CI pipeline
 ├── scripts/                                   # Automated orchestration and operational scripts
 │   ├── deploy.sh                              # Complete end-to-end automated deployment suite
 │   ├── verify.sh                              # Post-deployment health checks and smoke testing
@@ -130,7 +156,7 @@ dns-lb-ingress-service-pods/
     │   ├── variables.tf                       # Region and bucket prefix variables
     │   └── versions.tf                        # Terraform and AWS provider constraints
     ├── infra/                                 # Main infrastructure & workload module
-    │   ├── main.tf                            # VPC, EKS Auto Mode, ACM, Helm (Ingress), Route 53, K8s
+    │   ├── main.tf                            # VPC, EKS, ACM, Ingress-NGINX (2x, PDB), Route 53, HPA, PDB
     │   ├── variables.tf                       # Configurable parameters (domain, region, image, tags)
     │   ├── outputs.tf                         # Application URL, cluster endpoint, NLB hostname
     │   ├── versions.tf                        # Provider requirements (aws, kubernetes, helm, time)

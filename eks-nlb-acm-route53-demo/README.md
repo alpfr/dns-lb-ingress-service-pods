@@ -37,6 +37,7 @@ This module contains the complete, production-ready implementation of an **Amazo
 ## Architecture & Design Highlights
 
 - **EKS Auto Mode**: Dynamically manages EC2 node pools (`general-purpose`) with automated node provisioning and scaling without requiring manual node group or Karpenter installations.
+- **Existing VPC Reuse or Dedicated Provisioning**: Supports deploying directly into any existing VPC (e.g. `vpc-04069dd8bf42ea2db` in `us-east-1`) with automated subnet discovery, or cleanly provisioning a dedicated multi-AZ VPC with NAT Gateway.
 - **SSL Termination at the NLB**: The AWS Network Load Balancer offloads TLS decryption using an ACM certificate validated via Route 53 DNS records.
 - **Redirect Loop Prevention**: Because traffic from the NLB arrives at Ingress NGINX as plain HTTP, `nginx.ingress.kubernetes.io/ssl-redirect` is explicitly set to `"false"`. The controller config enables `"use-forwarded-headers" = "true"`, preventing `308 Permanent Redirect` / `ERR_TOO_MANY_REDIRECTS` loops.
 - **High Availability Ingress Controller**: Deploys 2 controller replicas with a Pod Disruption Budget (`minAvailable: 1`), multi-zone topology spread constraints, and dedicated HTTP `/healthz` target health checks on port `10254`.
@@ -61,9 +62,9 @@ eks-nlb-acm-route53-demo/
 │   ├── variables.tf                   # Region and bucket prefix variables
 │   └── versions.tf                    # AWS provider constraints
 ├── infra/                             # Core infrastructure and Kubernetes workloads
-│   ├── main.tf                        # VPC, EKS, ACM, Ingress-NGINX, Route 53, K8s manifests
-│   ├── variables.tf                   # Input variable definitions
-│   ├── outputs.tf                     # Output endpoints and connection data
+│   ├── main.tf                        # VPC (conditional), EKS, ACM, Ingress-NGINX, Route 53, K8s manifests
+│   ├── variables.tf                   # Input variable definitions (domain_name, vpc_id, subnet_ids)
+│   ├── outputs.tf                     # Output endpoints, VPC ID, and connection data
 │   ├── versions.tf                    # Terraform, AWS, Kubernetes, Helm, Time provider constraints
 │   ├── backend.tf.example             # Template for S3 remote backend
 │   └── terraform.tfvars.example       # Template for environment input variables
@@ -81,13 +82,19 @@ eks-nlb-acm-route53-demo/
 For end-to-end automated deployment without manual execution:
 
 ```bash
-# From the repository root:
+# Deploy with auto-discovery of existing VPC:
 ./scripts/deploy.sh --domain alpfrtech.com -y
+
+# Deploy into a specific existing VPC:
+./scripts/deploy.sh --vpc-id vpc-04069dd8bf42ea2db -y
+
+# Force creating a new dedicated VPC:
+./scripts/deploy.sh --create-vpc -y
 
 # Verify health probes:
 ./scripts/verify.sh --domain alpfrtech.com
 
-# Teardown:
+# Teardown (existing VPC remains completely preserved):
 ./scripts/destroy.sh
 ```
 

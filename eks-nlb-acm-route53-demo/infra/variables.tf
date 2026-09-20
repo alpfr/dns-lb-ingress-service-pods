@@ -10,6 +10,18 @@ variable "cluster_name" {
   default     = "demo-eks"
 }
 
+variable "vpc_id" {
+  type        = string
+  description = "Optional existing VPC ID. If provided, EKS and NLB deploy into this VPC instead of creating a new one."
+  default     = ""
+}
+
+variable "subnet_ids" {
+  type        = list(string)
+  description = "Optional list of subnet IDs for EKS. If empty and vpc_id is provided, subnets will be automatically discovered."
+  default     = []
+}
+
 variable "domain_name" {
   type        = string
   description = "Route53 public hosted zone name (e.g. alpfrtech.com)"

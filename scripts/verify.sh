@@ -78,12 +78,21 @@ if [[ -f "${INFRA_DIR}/terraform.tfvars" ]]; then
             APP_SUBDOMAIN="$EXTRACTED_SUB"
         fi
     fi
+    RAW_VPC=$(grep -E '^\s*vpc_id\s*=' "${INFRA_DIR}/terraform.tfvars" | head -n 1 | awk -F'=' '{print $2}' | tr -d ' "' || true)
+    if [[ -n "$RAW_VPC" && "$RAW_VPC" =~ ^vpc-[a-f0-9]+$ ]]; then
+        VPC_ID="$RAW_VPC"
+    fi
 fi
 
 APP_URL="https://${APP_SUBDOMAIN}.${DOMAIN_NAME}"
 
 echo -e "\n${BOLD}${CYAN}🔍 Starting Health and Verification Suite${NC}"
-echo -e "Target Application URL: ${BOLD}${APP_URL}${NC}\n"
+echo -e "Target Application URL: ${BOLD}${APP_URL}${NC}"
+if [[ -n "${VPC_ID:-}" ]]; then
+    echo -e "VPC:                    ${BOLD}Existing (${VPC_ID})${NC}\n"
+else
+    echo -e "VPC:                    ${BOLD}Dedicated demo-eks-vpc${NC}\n"
+fi
 
 # 1. Cluster connectivity & Node check
 echo -e "${BOLD}${BLUE}[1/4] Checking EKS Cluster Nodes (Auto Mode)...${NC}"

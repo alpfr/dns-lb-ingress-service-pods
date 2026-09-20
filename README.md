@@ -179,25 +179,23 @@ You can deploy the complete infrastructure and application using the automated o
 # 1. Clone or navigate to the repository
 cd dns-lb-ingress-service-pods
 
-# 2. Run the end-to-end deployment script (auto-provisions S3 state, ECR, Docker image, EKS, Ingress, DNS)
+# 2. Run the end-to-end deployment script (auto-detects existing VPC in us-east-1 or specify one)
 ./scripts/deploy.sh --domain alpfrtech.com
 
-# Or with options:
-./scripts/deploy.sh \
-  --domain alpfrtech.com \
-  --subdomain app \
-  --region us-east-1 \
-  --cluster demo-eks \
-  --auto-approve
+# Deploy into a specific existing VPC:
+./scripts/deploy.sh --vpc-id vpc-04069dd8bf42ea2db -y
+
+# Or force creation of a brand new dedicated VPC:
+./scripts/deploy.sh --create-vpc -y
 ```
 
 ### Operational Scripts Reference
 
 | Script | Purpose | Example Command |
 | :--- | :--- | :--- |
-| **`scripts/deploy.sh`** | Full end-to-end automation: bootstrap S3 state bucket, create ECR repo, build & push image, configure backend/tfvars, apply Terraform, and verify | `./scripts/deploy.sh -d alpfrtech.com -y` |
-| **`scripts/verify.sh`** | Runs cluster connectivity, node status, Ingress controller NLB status, and probes `/healthz` and `/` endpoints | `./scripts/verify.sh -d alpfrtech.com` |
-| **`scripts/destroy.sh`** | Safely tears down the EKS cluster, NLB, Route 53 records, with options to delete ECR image repo and S3 state bucket | `./scripts/destroy.sh -y --delete-ecr` |
+| **`scripts/deploy.sh`** | Full end-to-end automation: auto-discovers healthy VPCs in region, bootstraps S3 state bucket, creates ECR repo, builds & pushes image, configures backend/tfvars, applies Terraform, and verifies | `./scripts/deploy.sh --vpc-id vpc-04069dd8bf42ea2db -y` |
+| **`scripts/verify.sh`** | Runs cluster connectivity, node status, Ingress controller NLB status, VPC verification, and probes `/healthz` and `/` endpoints | `./scripts/verify.sh -d alpfrtech.com` |
+| **`scripts/destroy.sh`** | Safely tears down the EKS cluster, NLB, Route 53 records (preserves existing VPC intact), with options to delete ECR image repo and S3 state bucket | `./scripts/destroy.sh -y --delete-ecr` |
 
 ---
 

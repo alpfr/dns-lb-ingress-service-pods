@@ -21,9 +21,63 @@ resource "aws_route53_zone" "created" {
 
 locals {
   route53_zone_id = var.create_route53_zone ? aws_route53_zone.created[0].zone_id : data.aws_route53_zone.existing[0].zone_id
+  create_vpc      = var.vpc_id == ""
+}
+
+data "aws_vpc" "selected" {
+  count = local.create_vpc ? 0 : 1
+  id    = var.vpc_id
+}
+
+data "aws_subnets" "existing_private" {
+  count = local.create_vpc ? 0 : 1
+  filter {
+    name   = "vpc-id"
+    values = [var.vpc_id]
+  }
+  filter {
+    name   = "tag:kubernetes.io/role/internal-elb"
+    values = ["1"]
+  }
+}
+
+data "aws_subnets" "existing_non_public" {
+  count = local.create_vpc ? 0 : 1
+  filter {
+    name   = "vpc-id"
+    values = [var.vpc_id]
+  }
+  filter {
+    name   = "map-public-ip-on-launch"
+    values = ["false"]
+  }
+}
+
+data "aws_subnets" "existing_all" {
+  count = local.create_vpc ? 0 : 1
+  filter {
+    name   = "vpc-id"
+    values = [var.vpc_id]
+  }
+}
+
+locals {
+  existing_subnets = local.create_vpc ? [] : (
+    length(var.subnet_ids) > 0 ? var.subnet_ids : (
+      length(try(data.aws_subnets.existing_private[0].ids, [])) >= 2 ? data.aws_subnets.existing_private[0].ids : (
+        length(try(data.aws_subnets.existing_non_public[0].ids, [])) >= 2 ? data.aws_subnets.existing_non_public[0].ids : (
+          data.aws_subnets.existing_all[0].ids
+        )
+      )
+    )
+  )
+
+  cluster_vpc_id     = local.create_vpc ? module.vpc[0].vpc_id : var.vpc_id
+  cluster_subnet_ids = local.create_vpc ? module.vpc[0].private_subnets : local.existing_subnets
 }
 
 module "vpc" {
+  count   = local.create_vpc ? 1 : 0
   source  = "terraform-aws-modules/vpc/aws"
   version = "~> 6.0"
 
@@ -58,8 +112,8 @@ module "eks" {
   endpoint_public_access                   = true
   enable_cluster_creator_admin_permissions = true
 
-  vpc_id     = module.vpc.vpc_id
-  subnet_ids = module.vpc.private_subnets
+  vpc_id     = local.cluster_vpc_id
+  subnet_ids = local.cluster_subnet_ids
 
   compute_config = {
     enabled    = true

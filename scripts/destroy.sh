@@ -83,6 +83,12 @@ echo "  • AWS Network Load Balancer (NLB)"
 echo "  • Route 53 DNS Records"
 echo "  • ACM TLS Certificate"
 echo "  • Ingress NGINX Helm Release & Microservice Pods"
+if [[ -f "${INFRA_DIR}/terraform.tfvars" ]] && grep -qE '^\s*vpc_id\s*=\s*"vpc-' "${INFRA_DIR}/terraform.tfvars"; then
+    VPC_USED=$(grep -E '^\s*vpc_id\s*=' "${INFRA_DIR}/terraform.tfvars" | head -n 1 | awk -F'=' '{print $2}' | tr -d ' "')
+    echo -e "${GREEN}  • Existing VPC (${VPC_USED}) is PRESERVED and will NOT be modified or destroyed.${NC}"
+else
+    echo "  • Dedicated VPC and Subnets (if created by Terraform)"
+fi
 if [[ "$DELETE_ECR" == true ]]; then
     echo "  • Amazon ECR Repository (${ECR_REPO_NAME})"
 fi

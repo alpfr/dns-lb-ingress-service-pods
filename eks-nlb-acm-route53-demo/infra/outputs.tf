@@ -22,3 +22,13 @@ output "ecr_note" {
   description = "Guidance note on building and pushing the container image"
   value       = "Build and push app_image before applying the Kubernetes deployment."
 }
+
+output "vpc_id" {
+  description = "VPC ID where the EKS cluster and workloads are deployed"
+  value       = local.cluster_vpc_id
+}
+
+output "subnet_ids" {
+  description = "Subnet IDs utilized by the EKS cluster"
+  value       = local.cluster_subnet_ids
+}

@@ -58,6 +58,9 @@ DOMAIN_NAME="alpfrtech.com"
 DOMAIN_PROVIDED=false
 APP_SUBDOMAIN="app"
 APP_SUBDOMAIN_PROVIDED=false
+VPC_ID=""
+VPC_ID_PROVIDED=false
+FORCE_CREATE_VPC=false
 IMAGE_TAG="v1"
 SKIP_BOOTSTRAP=false
 SKIP_BUILD=false
@@ -76,6 +79,9 @@ Options:
   -s, --subdomain SUB       Subdomain prefix for application (default: app)
   -r, --region REGION       AWS region (default: us-east-1 or \$AWS_REGION)
   -c, --cluster NAME        EKS cluster name (default: demo-eks)
+  --vpc-id VPC_ID           Use an existing VPC ID in the target AWS region
+  --use-existing-vpc        Auto-select or prompt for an existing VPC (default behavior)
+  --create-vpc              Force creation of a new dedicated VPC (demo-eks-vpc)
   -t, --tag TAG             Container image tag (default: v1)
   --create-zone             Create a new Route 53 public hosted zone if not present
   --skip-bootstrap          Skip S3 state bucket bootstrap (assumes backend.tf is configured)
@@ -85,8 +91,9 @@ Options:
 
 Examples:
   $(basename "$0")
-  $(basename "$0") --domain alpfrtech.com
-  $(basename "$0") -d alpfrtech.com -s app -r us-east-1 -y
+  $(basename "$0") --vpc-id vpc-04069dd8bf42ea2db
+  $(basename "$0") --create-vpc
+  $(basename "$0") --domain alpfrtech.com -y
 EOF
     exit 0
 }
@@ -110,6 +117,19 @@ while [[ $# -gt 0 ]]; do
         -c|--cluster)
             CLUSTER_NAME="$2"
             shift 2
+            ;;
+        --vpc-id)
+            VPC_ID="$2"
+            VPC_ID_PROVIDED=true
+            shift 2
+            ;;
+        --create-vpc)
+            FORCE_CREATE_VPC=true
+            shift
+            ;;
+        --use-existing-vpc)
+            FORCE_CREATE_VPC=false
+            shift
             ;;
         -t|--tag)
             IMAGE_TAG="$2"
@@ -159,6 +179,14 @@ if [[ "$APP_SUBDOMAIN_PROVIDED" == false && -f "${INFRA_DIR}/terraform.tfvars" ]
     fi
 fi
 
+if [[ "$VPC_ID_PROVIDED" == false && "$FORCE_CREATE_VPC" == false && -f "${INFRA_DIR}/terraform.tfvars" ]]; then
+    RAW_VPC=$(grep -E '^\s*vpc_id\s*=' "${INFRA_DIR}/terraform.tfvars" | head -n 1 | awk -F'=' '{print $2}' | tr -d ' "' || true)
+    if [[ -n "$RAW_VPC" && "$RAW_VPC" =~ ^vpc-[a-f0-9]+$ ]]; then
+        VPC_ID="$RAW_VPC"
+        print_success "Using vpc_id from terraform.tfvars: ${VPC_ID}"
+    fi
+fi
+
 if [[ -z "$DOMAIN_NAME" ]]; then
     print_error "Domain name is required. Provide with --domain <your-domain.com>"
     usage
@@ -175,6 +203,13 @@ echo -e "  Domain:         ${BOLD}${DOMAIN_NAME}${NC}"
 echo -e "  Application URL:${BOLD}https://${APP_SUBDOMAIN}.${DOMAIN_NAME}${NC}"
 echo -e "  AWS Region:     ${BOLD}${AWS_REGION}${NC}"
 echo -e "  Cluster Name:   ${BOLD}${CLUSTER_NAME}${NC}"
+if [[ "$FORCE_CREATE_VPC" == true ]]; then
+    echo -e "  VPC:            ${BOLD}Create dedicated VPC${NC}"
+elif [[ -n "$VPC_ID" ]]; then
+    echo -e "  VPC:            ${BOLD}Existing (${VPC_ID})${NC}"
+else
+    echo -e "  VPC:            ${BOLD}Auto-discover in ${AWS_REGION}${NC}"
+fi
 echo -e "  Skip Bootstrap: ${BOLD}${SKIP_BOOTSTRAP}${NC}"
 echo -e "  Skip Build:     ${BOLD}${SKIP_BUILD}${NC}"
 
@@ -183,13 +218,13 @@ echo -e "  Skip Build:     ${BOLD}${SKIP_BUILD}${NC}"
 # ------------------------------------------------------------------------------
 print_step "1/5" "Verifying CLI tools and AWS authentication"
 
-for tool in aws terraform docker kubectl; do
+for tool in aws terraform docker kubectl jq; do
     if ! command -v "$tool" &> /dev/null; then
         print_error "Required tool not found in PATH: $tool"
         exit 1
     fi
 done
-print_success "CLI tools present: aws, terraform, docker, kubectl"
+print_success "CLI tools present: aws, terraform, docker, kubectl, jq"
 
 TF_VERSION=$(terraform -version | head -n 1)
 print_success "Terraform version: $TF_VERSION"
@@ -213,6 +248,76 @@ if [[ -z "$ZONE_ID" || "$ZONE_ID" == "None" ]]; then
 else
     print_success "Found active Route 53 Hosted Zone: ${ZONE_ID}"
     CREATE_ROUTE53_ZONE=false
+fi
+
+echo "Verifying VPC configuration for ${AWS_REGION}..."
+if [[ "$FORCE_CREATE_VPC" == true ]]; then
+    print_warning "New dedicated VPC creation requested (--create-vpc)."
+    VPC_ID=""
+elif [[ -n "$VPC_ID" ]]; then
+    if aws ec2 describe-vpcs --vpc-ids "$VPC_ID" --region "$AWS_REGION" &>/dev/null; then
+        VPC_NAME=$(aws ec2 describe-vpcs --vpc-ids "$VPC_ID" --region "$AWS_REGION" --query "Vpcs[0].Tags[?Key=='Name'].Value|[0]" --output text 2>/dev/null || echo "")
+        print_success "Using specified existing VPC: ${VPC_ID} (${VPC_NAME:-Unnamed})"
+    else
+        print_error "VPC '${VPC_ID}' was not found in region '${AWS_REGION}'."
+        exit 1
+    fi
+else
+    echo "Scanning for existing VPCs in ${AWS_REGION}..."
+    IGW_VPCS=$(aws ec2 describe-internet-gateways --region "$AWS_REGION" --query "InternetGateways[*].Attachments[*].VpcId" --output text 2>/dev/null || true)
+    NAT_VPCS=$(aws ec2 describe-nat-gateways --region "$AWS_REGION" --filter "Name=state,Values=available" --query "NatGateways[*].VpcId" --output text 2>/dev/null || true)
+
+    CANDIDATE_IDS=()
+    CANDIDATE_LABELS=()
+
+    while IFS=$'\t' read -r vid vname vcidr; do
+        [[ -z "$vid" ]] && continue
+        vname="${vname:-Unnamed}"
+        has_igw="No"
+        has_nat="No"
+        if echo "$IGW_VPCS" | grep -qw "$vid"; then has_igw="Yes"; fi
+        if echo "$NAT_VPCS" | grep -qw "$vid"; then has_nat="Yes"; fi
+
+        lbl="${vid} | ${vname} | CIDR: ${vcidr} | IGW: ${has_igw} | NAT: ${has_nat}"
+        if [[ "$has_igw" == "Yes" && "$has_nat" == "Yes" ]]; then
+            lbl="${lbl} (Recommended)"
+            CANDIDATE_IDS=("$vid" "${CANDIDATE_IDS[@]}")
+            CANDIDATE_LABELS=("$lbl" "${CANDIDATE_LABELS[@]}")
+        else
+            CANDIDATE_IDS+=("$vid")
+            CANDIDATE_LABELS+=("$lbl")
+        fi
+    done < <(aws ec2 describe-vpcs --region "$AWS_REGION" --output json 2>/dev/null | jq -r '.Vpcs[] | ["\(.VpcId)", "\(.Tags[]? | select(.Key=="Name") | .Value)", "\(.CidrBlock)"] | @tsv' || true)
+
+    if [[ ${#CANDIDATE_IDS[@]} -gt 0 ]]; then
+        if [[ "$AUTO_APPROVE" == true || "$VPC_ID_PROVIDED" == true ]]; then
+            VPC_ID="${CANDIDATE_IDS[0]}"
+            print_success "Auto-selected healthy existing VPC: ${VPC_ID} (${CANDIDATE_LABELS[0]})"
+        else
+            echo -e "\n${BOLD}${CYAN}Existing VPCs discovered in ${AWS_REGION}:${NC}"
+            for i in "${!CANDIDATE_LABELS[@]}"; do
+                idx=$((i + 1))
+                echo -e "  [${idx}] ${CANDIDATE_LABELS[$i]}"
+            done
+            new_idx=$((${#CANDIDATE_LABELS[@]} + 1))
+            echo -e "  [${new_idx}] Create a new dedicated VPC (demo-eks-vpc)"
+
+            read -rp "Select VPC option [1-${new_idx}] (default: 1): " vpc_choice
+            vpc_choice="${vpc_choice:-1}"
+
+            if [[ "$vpc_choice" =~ ^[0-9]+$ ]] && [ "$vpc_choice" -ge 1 ] && [ "$vpc_choice" -le "${#CANDIDATE_IDS[@]}" ]; then
+                chosen_idx=$((vpc_choice - 1))
+                VPC_ID="${CANDIDATE_IDS[$chosen_idx]}"
+                print_success "Selected existing VPC: ${VPC_ID}"
+            else
+                VPC_ID=""
+                print_warning "Proceeding with new dedicated VPC creation."
+            fi
+        fi
+    else
+        print_warning "No existing VPCs found in ${AWS_REGION}. A new dedicated VPC will be created."
+        VPC_ID=""
+    fi
 fi
 
 # ------------------------------------------------------------------------------
@@ -294,6 +399,7 @@ echo "Updating ${INFRA_DIR}/terraform.tfvars..."
 cat > "${INFRA_DIR}/terraform.tfvars" <<EOF
 aws_region                  = "${AWS_REGION}"
 cluster_name                = "${CLUSTER_NAME}"
+vpc_id                      = "${VPC_ID}"
 domain_name                 = "${DOMAIN_NAME}"
 app_subdomain               = "${APP_SUBDOMAIN}"
 app_image                   = "${ECR_URI}"

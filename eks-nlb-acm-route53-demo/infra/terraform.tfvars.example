@@ -1,6 +1,8 @@
 aws_region                  = "us-east-1"
 cluster_name                = "demo-eks"
-domain_name                 = "alpfr.com"
+domain_name                 = "alpfrtech.com"
 app_subdomain               = "app"
 app_image                   = "123456789012.dkr.ecr.us-east-1.amazonaws.com/demo-app:v1"
 ingress_nginx_chart_version = "4.15.1"
+create_route53_zone         = false
+

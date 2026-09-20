@@ -54,12 +54,13 @@ APP_DIR="${DEMO_DIR}/app"
 # ------------------------------------------------------------------------------
 AWS_REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
 CLUSTER_NAME="demo-eks"
-DOMAIN_NAME="alpfr.com"
+DOMAIN_NAME="alpfrtech.com"
 APP_SUBDOMAIN="app"
 IMAGE_TAG="v1"
 SKIP_BOOTSTRAP=false
 SKIP_BUILD=false
 AUTO_APPROVE=false
+CREATE_ROUTE53_ZONE=false
 
 usage() {
     cat <<EOF
@@ -69,11 +70,12 @@ Automates the provisioning of EKS Auto Mode, S3 state backend, ECR repository,
 container build & push, Ingress NGINX with NLB TLS termination, and Route 53 DNS.
 
 Options:
-  -d, --domain DOMAIN       Route 53 public hosted zone name (default: alpfr.com)
+  -d, --domain DOMAIN       Route 53 public hosted zone name (default: alpfrtech.com)
   -s, --subdomain SUB       Subdomain prefix for application (default: app)
   -r, --region REGION       AWS region (default: us-east-1 or \$AWS_REGION)
   -c, --cluster NAME        EKS cluster name (default: demo-eks)
   -t, --tag TAG             Container image tag (default: v1)
+  --create-zone             Create a new Route 53 public hosted zone if not present
   --skip-bootstrap          Skip S3 state bucket bootstrap (assumes backend.tf is configured)
   --skip-build              Skip Docker build and push to Amazon ECR
   -y, --auto-approve        Auto approve Terraform apply and bootstrap operations
@@ -81,8 +83,8 @@ Options:
 
 Examples:
   $(basename "$0")
-  $(basename "$0") --domain alpfr.com
-  $(basename "$0") -d alpfr.com -s app -r us-east-1 -y
+  $(basename "$0") --domain alpfrtech.com
+  $(basename "$0") -d alpfrtech.com -s app -r us-east-1 -y
 EOF
     exit 0
 }
@@ -108,6 +110,10 @@ while [[ $# -gt 0 ]]; do
         -t|--tag)
             IMAGE_TAG="$2"
             shift 2
+            ;;
+        --create-zone)
+            CREATE_ROUTE53_ZONE=true
+            shift
             ;;
         --skip-bootstrap)
             SKIP_BOOTSTRAP=true
@@ -184,9 +190,16 @@ print_success "Authenticated to AWS Account: ${ACCOUNT_ID} (${CALLER_ARN})"
 echo "Verifying Route 53 public hosted zone for ${DOMAIN_NAME}..."
 ZONE_ID=$(aws route53 list-hosted-zones-by-name --dns-name "${DOMAIN_NAME}." --query "HostedZones[?Name=='${DOMAIN_NAME}.'].Id" --output text 2>/dev/null | head -n 1 || true)
 if [[ -z "$ZONE_ID" || "$ZONE_ID" == "None" ]]; then
-    print_warning "Could not confirm public hosted zone for '${DOMAIN_NAME}'. Ensure it exists before ACM validation runs."
+    if [[ "$CREATE_ROUTE53_ZONE" == true ]]; then
+        print_warning "No existing hosted zone found for '${DOMAIN_NAME}'. Terraform will automatically create it in Route 53."
+    else
+        print_warning "No existing public hosted zone found for '${DOMAIN_NAME}' in AWS."
+        print_warning "Enabling 'create_route53_zone = true' so Terraform automatically provisions it."
+        CREATE_ROUTE53_ZONE=true
+    fi
 else
-    print_success "Found Route 53 Hosted Zone: ${ZONE_ID}"
+    print_success "Found active Route 53 Hosted Zone: ${ZONE_ID}"
+    CREATE_ROUTE53_ZONE=false
 fi
 
 # ------------------------------------------------------------------------------
@@ -272,6 +285,7 @@ domain_name                 = "${DOMAIN_NAME}"
 app_subdomain               = "${APP_SUBDOMAIN}"
 app_image                   = "${ECR_URI}"
 ingress_nginx_chart_version = "4.15.1"
+create_route53_zone         = ${CREATE_ROUTE53_ZONE}
 tags = {
   Environment = "Production"
   ManagedBy   = "Terraform"

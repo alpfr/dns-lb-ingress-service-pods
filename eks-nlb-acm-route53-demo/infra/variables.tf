@@ -12,8 +12,14 @@ variable "cluster_name" {
 
 variable "domain_name" {
   type        = string
-  description = "Existing Route53 public hosted zone (e.g. alpfr.com)"
-  default     = "alpfr.com"
+  description = "Route53 public hosted zone name (e.g. alpfrtech.com)"
+  default     = "alpfrtech.com"
+}
+
+variable "create_route53_zone" {
+  type        = bool
+  description = "Whether to create a new Route 53 public hosted zone if one does not already exist in AWS"
+  default     = false
 }
 
 variable "app_subdomain" {

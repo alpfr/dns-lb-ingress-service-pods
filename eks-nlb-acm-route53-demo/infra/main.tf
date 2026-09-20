@@ -7,9 +7,20 @@ data "aws_availability_zones" "available" {
   }
 }
 
-data "aws_route53_zone" "public" {
+data "aws_route53_zone" "existing" {
+  count        = var.create_route53_zone ? 0 : 1
   name         = var.domain_name
   private_zone = false
+}
+
+resource "aws_route53_zone" "created" {
+  count = var.create_route53_zone ? 1 : 0
+  name  = var.domain_name
+  tags  = var.tags
+}
+
+locals {
+  route53_zone_id = var.create_route53_zone ? aws_route53_zone.created[0].zone_id : data.aws_route53_zone.existing[0].zone_id
 }
 
 module "vpc" {
@@ -103,7 +114,7 @@ resource "aws_route53_record" "validation" {
   }
 
   allow_overwrite = true
-  zone_id         = data.aws_route53_zone.public.zone_id
+  zone_id         = local.route53_zone_id
   name            = each.value.name
   type            = each.value.type
   records         = [each.value.record]
@@ -116,7 +127,7 @@ resource "aws_acm_certificate_validation" "app" {
 }
 
 resource "aws_route53_record" "caa" {
-  zone_id         = data.aws_route53_zone.public.zone_id
+  zone_id         = local.route53_zone_id
   name            = var.domain_name
   type            = "CAA"
   ttl             = 300
@@ -201,7 +212,7 @@ data "kubernetes_service_v1" "ingress" {
 }
 
 resource "aws_route53_record" "app" {
-  zone_id         = data.aws_route53_zone.public.zone_id
+  zone_id         = local.route53_zone_id
   name            = "${var.app_subdomain}.${var.domain_name}"
   type            = "CNAME"
   ttl             = 60

@@ -9,6 +9,8 @@ override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
+*.tfplan
+*plan
 
 # Local variable definitions (contain sensitive values / accounts)
 terraform.tfvars

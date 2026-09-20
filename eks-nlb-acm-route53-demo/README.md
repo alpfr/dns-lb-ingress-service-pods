@@ -78,21 +78,11 @@ eks-nlb-acm-route53-demo/
 │   ├── versions.tf                    # Terraform, AWS, Kubernetes, Helm, Time provider constraints
 │   ├── backend.tf.example             # Template for S3 remote backend
 │   └── terraform.tfvars.example       # Template for environment input variables
-└── app/                               # ClauseGuard AI - Intelligent Contract Risk SaaS
-    ├── app.py                         # FastAPI server with /api/analyze, /api/chat, /healthz
+└── app/                               # Python Flask microservice
+    ├── app.py                         # Application logic with / and /healthz endpoints
     ├── Dockerfile                     # Multi-stage, non-root hardened container
-    ├── requirements.txt               # FastAPI, Uvicorn, Gunicorn, PyPDF, Pydantic dependencies
-    ├── .dockerignore                  # Docker build exclusions
-    ├── services/                      # Modular AI analysis and parser engines
-    │   ├── __init__.py
-    │   ├── analyzer.py                # Dual-engine contract risk scoring and red-flag audit
-    │   ├── chat_assistant.py          # Context-grounded conversational Q&A assistant
-    │   ├── document_parser.py         # Multi-page PDF, text, and markdown parser
-    │   └── sample_contracts.py        # Pre-packaged real-world contracts for 1-click demos
-    └── static/                        # Modern single-page web application frontend
-        ├── index.html                 # Responsive dashboard with SVG risk gauge and chat
-        ├── css/styles.css             # Dark mode, glassmorphism design system & micro-animations
-        └── js/app.js                  # Client-side file dropzone, live radial gauge, and chat engine
+    ├── requirements.txt               # Flask and Gunicorn runtime dependencies
+    └── .dockerignore                  # Docker build exclusions
 ```
 
 ---

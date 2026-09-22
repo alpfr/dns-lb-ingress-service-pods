@@ -152,7 +152,7 @@ echo ""
 # 5. HTTPS Endpoint Verification
 echo -e "${BOLD}${BLUE}[5/5] Probing Public HTTPS Endpoints (${APP_URL})...${NC}"
 
-echo -e "Testing ${APP_URL}/healthz ..."
+echo -e "Testing ${APP_URL}/healthz (Liveness Probe)..."
 HTTP_HEALTH_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 10 --max-time 15 "${APP_URL}/healthz" 2>/dev/null || echo "000")
 HEALTH_RESPONSE=$(curl -s --connect-timeout 10 --max-time 15 "${APP_URL}/healthz" 2>/dev/null || echo "Failed to connect")
 
@@ -164,13 +164,34 @@ else
     echo -e "  Response: ${HEALTH_RESPONSE}"
 fi
 
-echo -e "\nTesting ${APP_URL}/ ..."
+echo -e "\nTesting ${APP_URL}/ready (Readiness Probe)..."
+HTTP_READY_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 10 --max-time 15 "${APP_URL}/ready" 2>/dev/null || echo "000")
+READY_RESPONSE=$(curl -s --connect-timeout 10 --max-time 15 "${APP_URL}/ready" 2>/dev/null || echo "Failed to connect")
+
+if [[ "$HTTP_READY_CODE" == "200" ]]; then
+    echo -e "${GREEN}✔ /ready returned HTTP 200 OK${NC}"
+    echo -e "  Response: ${READY_RESPONSE}"
+else
+    echo -e "${YELLOW}⚠ /ready returned HTTP ${HTTP_READY_CODE}${NC}"
+fi
+
+echo -e "\nTesting ${APP_URL}/api/info (Telemetry Payload)..."
+HTTP_INFO_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 10 --max-time 15 "${APP_URL}/api/info" 2>/dev/null || echo "000")
+INFO_RESPONSE=$(curl -s --connect-timeout 10 --max-time 15 "${APP_URL}/api/info" 2>/dev/null || echo "Failed to connect")
+
+if [[ "$HTTP_INFO_CODE" == "200" ]]; then
+    echo -e "${GREEN}✔ /api/info returned HTTP 200 OK${NC}"
+    echo -e "  Response summary: $(echo "$INFO_RESPONSE" | jq '{version: .version, pod: .pod.name, node: .pod.node, client_ip: .ingress.client_ip}' 2>/dev/null || echo "$INFO_RESPONSE" | cut -c 1-120)"
+else
+    echo -e "${YELLOW}⚠ /api/info returned HTTP ${HTTP_INFO_CODE}${NC}"
+fi
+
+echo -e "\nTesting ${APP_URL}/ (Interactive Dashboard)..."
 HTTP_ROOT_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 10 --max-time 15 "${APP_URL}/" 2>/dev/null || echo "000")
 ROOT_RESPONSE=$(curl -s --connect-timeout 10 --max-time 15 "${APP_URL}/" 2>/dev/null || echo "Failed to connect")
 
 if [[ "$HTTP_ROOT_CODE" == "200" ]]; then
-    echo -e "${GREEN}✔ / returned HTTP 200 OK${NC}"
-    echo -e "  Response: ${ROOT_RESPONSE}"
+    echo -e "${GREEN}✔ / returned HTTP 200 OK (Interactive Web UI Dashboard served)${NC}"
 else
     echo -e "${YELLOW}⚠ / returned HTTP ${HTTP_ROOT_CODE}${NC}"
 fi

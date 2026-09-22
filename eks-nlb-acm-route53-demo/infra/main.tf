@@ -297,9 +297,55 @@ resource "kubernetes_deployment_v1" "app" {
             value = "8080"
           }
 
+          env {
+            name = "POD_NAME"
+            value_from {
+              field_ref {
+                field_path = "metadata.name"
+              }
+            }
+          }
+
+          env {
+            name = "POD_NAMESPACE"
+            value_from {
+              field_ref {
+                field_path = "metadata.namespace"
+              }
+            }
+          }
+
+          env {
+            name = "POD_IP"
+            value_from {
+              field_ref {
+                field_path = "status.podIP"
+              }
+            }
+          }
+
+          env {
+            name = "NODE_NAME"
+            value_from {
+              field_ref {
+                field_path = "spec.nodeName"
+              }
+            }
+          }
+
+          env {
+            name  = "CLUSTER_NAME"
+            value = module.eks.cluster_name
+          }
+
+          env {
+            name  = "APP_VERSION"
+            value = "2.0.0"
+          }
+
           readiness_probe {
             http_get {
-              path = "/healthz"
+              path = "/ready"
               port = 8080
             }
             initial_delay_seconds = 3

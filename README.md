@@ -1,13 +1,13 @@
-# AWS EKS Auto Mode + NLB + Ingress NGINX + ACM + Route 53
+# AWS EKS Auto Mode + AWS ALB + AWS Load Balancer Controller + ACM + Route 53
 
 [![CI Pipeline](https://github.com/alpfr/dns-lb-ingress-service-pods/actions/workflows/ci.yml/badge.svg)](https://github.com/alpfr/dns-lb-ingress-service-pods/actions/workflows/ci.yml)
 [![AWS](https://img.shields.io/badge/AWS-EKS%20Auto%20Mode-FF9900?logo=amazon-aws&logoColor=white)](https://aws.amazon.com/eks/)
 [![Terraform](https://img.shields.io/badge/Terraform-%3E%3D%201.10.0-844FBA?logo=terraform&logoColor=white)](https://www.terraform.io/)
-[![NGINX](https://img.shields.io/badge/Ingress-NGINX%20Controller-009639?logo=nginx&logoColor=white)](https://kubernetes.github.io/ingress-nginx/)
+[![ALB](https://img.shields.io/badge/Ingress-AWS%20ALB%20Controller-009639?logo=amazon-aws&logoColor=white)](https://aws.github.io/eks-charts)
 [![Route 53](https://img.shields.io/badge/DNS-Route%2053-232F3E?logo=amazon-route53&logoColor=white)](https://aws.amazon.com/route53/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-A production-grade, enterprise-hardened Terraform starter demonstrating automated end-to-end traffic ingress on **Amazon EKS Auto Mode**, routing from a custom Route 53 domain through an **AWS Network Load Balancer (NLB)** with **AWS Certificate Manager (ACM)** TLS termination, into an in-cluster **NGINX Ingress Controller**, and down to secure, non-root microservice pods.
+A production-grade, enterprise-hardened Terraform starter demonstrating automated end-to-end traffic ingress on **Amazon EKS Auto Mode**, routing from a custom Route 53 domain through an **AWS Application Load Balancer (ALB)** with **AWS Certificate Manager (ACM)** TLS termination, managed directly via the **AWS Load Balancer Controller**, routing traffic with zero worker-node proxy overhead straight to microservice pod IPs (`target-type: ip`).
 
 ---
 
@@ -21,51 +21,42 @@ A production-grade, enterprise-hardened Terraform starter demonstrating automate
           │
           │ HTTPS (443) / TLS
           ▼
-   [Amazon Route 53] ── (DNS: app.alpfrtech.com -> NLB DNS Name | CAA: amazon.com)
+   [Amazon Route 53] ── (DNS: app.alpfrtech.com -> ALB DNS Name | CAA: amazon.com)
           │
           ▼
  ┌─────────────────────────────────────────────────────────────────────────────────────────────────┐
- │ AWS Network Load Balancer (Internet-Facing NLB)                                                 │
+ │ AWS Application Load Balancer (Internet-Facing ALB - AWS Managed Control Plane)                 │
  │                                                                                                 │
  │   • TLS Termination: ACM Public Certificate (*.alpfrtech.com / app.alpfrtech.com)               │
- │   • Target Type: IP (Direct Pod Routing / Cross-Zone Load Balancing)                            │
- │   • Dedicated HTTP Health Probe: /healthz on port 10254                                         │
- │   • Protocol to Ingress: Plain TCP / HTTP on Port 80                                            │
+ │   • Automated HTTP-to-HTTPS SSL Redirection (Port 80 -> 443)                                    │
+ │   • Target Type: IP (Direct Routing from VPC Subnets to Microservice Pod IPs)                   │
+ │   • Dedicated HTTP Health Probe: /healthz on container traffic-port                             │
+ │   • Zero Worker Node Ingress Overhead (No Ingress-NGINX proxy pods needed on nodes)             │
  └───────────────────────────────────────────────────┬─────────────────────────────────────────────┘
                                                      │
-                                                     │ Plain TCP / HTTP (80)
+                                                     │ Direct Pod IP Routing (Port 8080)
                                                      ▼
  ┌─────────────────────────────────────────────────────────────────────────────────────────────────┐
  │ Amazon EKS Cluster (EKS Auto Mode: Node Pools: "general-purpose")                               │
  │                                                                                                 │
- │   Namespace: ingress-nginx                                                                      │
+ │   Namespace: kube-system                                                                        │
  │   ┌─────────────────────────────────────────────────────────────────────────────────────────┐   │
- │   │ Ingress NGINX Controller Pods (Replicas: 2 | PDB: minAvailable 1)                       │   │
- │   │                                                                                         │   │
- │   │   • Multi-AZ Topology Spread (topology.kubernetes.io/zone)                              │   │
- │   │   • Host-Based & Path-Based Layer 7 Routing                                             │   │
- │   │   • ssl-redirect: "false" (Prevents ERR_TOO_MANY_REDIRECTS loop)                        │   │
- │   │   • use-forwarded-headers: "true" (Preserves client IP & X-Forwarded-Proto)             │   │
- │   │   • Rate Limiting: 50 rps | 20 max connections | 10MB payload size                      │   │
- │   │   • Structured JSON Access Logging (log-format-escape-json = "true")                    │   │
- │   │   • Prometheus Metrics Enabled on port 10254                                            │   │
- │   └─────────────────────────────────────────────┬───────────────────────────────────────────┘   │
- │                                                 │                                               │
- │                                                 │ ClusterIP (Port 80)                           │
- │                                                 ▼                                               │
+ │   │ AWS Load Balancer Controller (Operator managing ALB Ingress via IRSA)                   │   │
+ │   └─────────────────────────────────────────────────────────────────────────────────────────┘   │
+ │                                                                                                 │
  │   Namespace: default                                                                            │
  │   ┌─────────────────────────────────────────────────────────────────────────────────────────┐   │
  │   │ Kubernetes Service: demo-app (ClusterIP)                                                │   │
  │   │   • TargetPort: 8080                                                                    │   │
+ │   │ Kubernetes Ingress: demo-app (ingressClassName: "alb")                                  │   │
  │   └─────────────────────────────────────────────┬───────────────────────────────────────────┘   │
  │                                                 │                                               │
  │                                                 ▼                                               │
  │   ┌─────────────────────────────────────────────────────────────────────────────────────────┐   │
  │   │ Zero-Trust Kubernetes NetworkPolicy (demo-app-ingress-only)                             │   │
- │   │   • Enforces strict Ingress to TCP 8080 ONLY from namespace ingress-nginx              │   │
+ │   │   • Restricts Ingress on Port 8080 strictly to VPC CIDR IP blocks                       │   │
  │   └─────────────────────────────────────────────┬───────────────────────────────────────────┘   │
  │                                                 │                                               │
- │                                                 │ TargetPort (8080)                             │
  │                                                 ▼                                               │
  │   ┌─────────────────────────────────────────────────────────────────────────────────────────┐   │
  │   │ Flask Microservice Pods (HPA: 2-10 replicas | PDB: minAvailable 1)                      │   │
@@ -86,23 +77,23 @@ A production-grade, enterprise-hardened Terraform starter demonstrating automate
 ```mermaid
 graph TD
     Client([Internet Client]) -->|HTTPS :443| R53[Route 53 DNS Record]
-    R53 -->|CNAME / Alias| NLB[AWS Network Load Balancer]
-    subgraph AWS Network Load Balancer
-        ACM[ACM Certificate: *.alpfrtech.com] -.->|Decrypts TLS| NLB
-        Probe[Health Probe :10254 /healthz] -.->|Direct HTTP Probe| NGINX
+    R53 -->|CNAME| ALB[AWS Application Load Balancer]
+    subgraph AWS Application Load Balancer
+        ACM[ACM Certificate: *.alpfrtech.com] -.->|Terminates TLS| ALB
+        Redirect[Port 80 -> 443] -.->|SSL Redirect| ALB
+        Probe[Health Probe /healthz] -.->|Direct HTTP Probe| Pod1
     end
-    NLB -->|Plain HTTP :80| NGINX[NGINX Ingress Controller - 2 Replicas, PDB]
-    subgraph Ingress Layer
-        NGINX -->|Rate Limits & JSON Logging| Svc[Kubernetes Service: demo-app]
-    end
+    ALB -->|Direct IP Routing :8080| NP[NetworkPolicy: demo-app-ingress-only]
     subgraph Zero-Trust Isolation
-        Svc -->|Evaluates Policy| NP[NetworkPolicy: demo-app-ingress-only]
+        NP -->|Allowed VPC CIDR| Pod1[demo-app Pod 1 - Zone A]
+        NP -->|Allowed VPC CIDR| Pod2[demo-app Pod 2 - Zone B]
     end
     subgraph Workload Pods
-        NP -->|Allowed TCP 8080| Pod1[demo-app Pod 1 - Zone A]
-        NP -->|Allowed TCP 8080| Pod2[demo-app Pod 2 - Zone B]
         HPA[HPA 2-10 Replicas] -.->|Autoscales| Pod1
         HPA -.->|Autoscales| Pod2
+    end
+    subgraph Control Plane Operator
+        ALBController[AWS Load Balancer Controller in kube-system] -.->|Reconciles Ingress via IRSA| ALB
     end
 ```
 
@@ -110,29 +101,28 @@ graph TD
 
 ## Key Architectural Decisions & Engineering Mitigations
 
-### 1. SSL Offloading & Infinite Redirect Loop Mitigation
-- **The Challenge**: When HTTPS traffic terminates at an AWS NLB using an ACM certificate, the NLB forwards decrypted traffic downstream to Ingress NGINX over plain TCP/HTTP on port 80. By default, NGINX Ingress enforces SSL redirection (`ssl-redirect: "true"`). Because incoming traffic reaches the ingress pod on HTTP, NGINX repeatedly responds with `308 Permanent Redirect` back to `https://...`, creating an **`ERR_TOO_MANY_REDIRECTS`** browser loop.
+### 1. Offloading Ingress to AWS Control Plane (Zero Ingress-NGINX Overhead)
+- **The Challenge**: Traditional in-cluster Ingress controllers (like Ingress-NGINX) require dedicated controller pods running on worker nodes. These consume worker node CPU and memory, add hop latency, require manual replica scaling and pod disruption budgets, and present potential proxy vulnerabilities.
 - **The Solution**: 
-  - The ingress resource explicitly sets `"nginx.ingress.kubernetes.io/ssl-redirect" = "false"`.
-  - Ingress NGINX controller ConfigMap enables `"use-forwarded-headers" = "true"`, allowing downstream applications to accurately inspect `X-Forwarded-Proto` and `X-Forwarded-For`.
+  - Offloaded Layer-7 routing and TLS termination entirely to the AWS-managed **Application Load Balancer (ALB)**.
+  - The in-cluster footprint is reduced strictly to the **AWS Load Balancer Controller** operator in `kube-system`, which provisions and manages the ALB via Kubernetes Ingress manifests (`ingress_class_name = "alb"`).
+  - Worker nodes run zero proxy pods, freeing 100% of node compute for business workloads.
 
-### 2. Elimination of NLB Hostname Provisioning Race Condition
-- **The Challenge**: When deploying Helm charts that create AWS LoadBalancers, Kubernetes provisions the cloud infrastructure asynchronously. Attempting to query the `kubernetes_service_v1` status immediately causes Terraform to fail during initial apply because the NLB hostname is not yet populated.
+### 2. Direct Pod IP Targeting (`target-type: ip`)
+- **The Challenge**: Standard NodePort routing routes traffic to a worker node's port, which then uses `kube-proxy` iptables/IPVS to route traffic to another node where the pod resides, adding an unnecessary network hop and latency.
 - **The Solution**: 
-  - Integrated `time_sleep.wait_for_ingress_lb` with an automated 45-second stabilization window between Helm controller creation and Route 53 record resolution.
-  - Added `allow_overwrite = true` on Route 53 validation and application DNS records to eliminate stale record collisions.
+  - Configured `alb.ingress.kubernetes.io/target-type: "ip"`.
+  - The AWS ALB routes traffic directly to individual Pod IPs across VPC subnets. This eliminates extra network hops, preserves client IP, and enables precise target health tracking directly at the pod level.
 
-### 3. Native EKS Auto Mode Compute
+### 3. Automated SSL Redirect & TLS Termination
+- **The Advantage**: The ALB terminates TLS using a public ACM certificate validated via Route 53 DNS records, and enforces automated HTTP-to-HTTPS redirection natively via `alb.ingress.kubernetes.io/ssl-redirect: "443"`. This eliminates redirect loops while guaranteeing all public traffic is encrypted.
+
+### 4. Native EKS Auto Mode Compute
 - **The Advantage**: Uses AWS EKS Auto Mode (`compute_config = { enabled = true, node_pools = ["general-purpose"] }`). EKS dynamically provisions, patches, and scales AWS-optimized EC2 compute instances on-demand without managing separate EC2 Auto Scaling Groups or installing separate cluster autoscalers.
 
-### 4. Dynamic Provider Authentication (No Token Expiry)
+### 5. Dynamic Provider Authentication (No Token Expiry)
 - **The Challenge**: Using `data "aws_eks_cluster_auth"` injects a static authentication token into the Terraform state that expires in 15 minutes. VPC and EKS cluster creation often takes 12–18 minutes, resulting in `401 Unauthorized` errors when Terraform attempts to apply Kubernetes and Helm resources.
 - **The Solution**: The `kubernetes` and `helm` providers use dynamic client authentication via `aws eks get-token` in their `exec` blocks, generating a fresh, valid token for every single API request.
-
-### 5. Multi-AZ Ingress High Availability & Native Health Probes
-- **Ingress Controller Redundancy**: Configured with `replicaCount: 2`, `minAvailable: 1` Pod Disruption Budget, and `topologySpreadConstraints` ensuring controller pods are scheduled across distinct Availability Zones.
-- **Dedicated NLB Health Check**: NLB targets are checked via native HTTP `GET /healthz` on port `10254` rather than generic TCP connection checks, preventing traffic routing to unready ingress controllers.
-- **Prometheus Metrics**: Controller metrics are enabled out-of-the-box on port `10254` for integration with Prometheus, Datadog, or CloudWatch Container Insights.
 
 ### 6. Workload Auto-scaling & Disruption Resilience
 - **Horizontal Pod Autoscaling (HPA)**: Dynamically scales `demo-app` pods between 2 and 10 replicas based on 70% CPU and 80% Memory thresholds.
@@ -160,21 +150,13 @@ graph TD
 - **Automated Scan on Push**: Every image pushed to Amazon ECR triggers automated CVE vulnerability scanning (`scanOnPush = true`), alerting teams to common base image vulnerabilities prior to cluster deployment.
 - **Automated Lifecycle Policy**: Cleans up dangling untagged images older than 14 days and retains only the 10 most recent images, eliminating storage bloat and AWS ECR storage costs.
 
-### 12. Zero-Trust Kubernetes NetworkPolicy (Ingress Isolation)
+### 12. Zero-Trust Kubernetes NetworkPolicy (VPC Ingress Isolation)
 - **Pod-to-Pod Traffic Segmentation**: Implements `kubernetes_network_policy_v1.app_ingress_isolation` in the `default` namespace.
-- **Strict Ingress Rule**: Drops all traffic to `demo-app` pods on port 8080 *except* requests originating from pods labeled `app.kubernetes.io/name = ingress-nginx` residing inside the `ingress-nginx` namespace. This prevents compromised workloads in other namespaces or pods from moving laterally within the cluster network.
+- **Strict Ingress Rule**: Drops unauthorized cluster-internal traffic while permitting ingress on port 8080 strictly from the VPC CIDR block. This allows the AWS ALB to perform direct pod routing and health checks while blocking lateral attacks from untrusted pods.
 
 ### 13. Wildcard & Apex Subject Alternative Names (SANs) on ACM
 - **Broad Domain Coverage**: The public ACM certificate covers both the root apex (`alpfrtech.com`), the primary service subdomain (`app.alpfrtech.com`), and all future subdomains via wildcard (`*.alpfrtech.com`).
 - **Collision-Resistant DNS Validation**: Terraform keys Route 53 validation records by `dvo.domain_name` with `allow_overwrite = true`, preventing duplicate key collisions in Terraform state while ensuring AWS validates both apex and wildcard SANs simultaneously.
-
-### 14. Layer 7 Rate Limiting & Connection Throttling
-- **Ingress NGINX Rate Limiting**: Ingress resource specifies `nginx.ingress.kubernetes.io/limit-rps = "50"` and `limit-connections = "20"`.
-- **Payload Protection**: Sets `nginx.ingress.kubernetes.io/proxy-body-size = "10m"`, mitigating Denial of Service (DoS) attacks, brute-force bursts, and large payload buffer exhaustion.
-
-### 15. Structured JSON Upstream Access Logging
-- **Observability & Analytics**: Ingress NGINX controller ConfigMap configures `log-format-escape-json = "true"` and emits uniform JSON access log records with timestamp, client IP, host, HTTP method, upstream status, request time, and upstream response time.
-- **Log Shipper Compatibility**: Ready for immediate parsing by CloudWatch Container Insights, AWS OpenSearch, Datadog, or Grafana Loki without complex grok patterns.
 
 ---
 

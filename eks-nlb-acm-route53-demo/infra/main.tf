@@ -190,91 +190,49 @@ resource "aws_route53_record" "caa" {
   allow_overwrite = true
 }
 
-resource "helm_release" "ingress_nginx" {
-  name             = "ingress-nginx"
-  namespace        = "ingress-nginx"
-  create_namespace = true
-  repository       = "https://kubernetes.github.io/ingress-nginx"
-  chart            = "ingress-nginx"
-  version          = var.ingress_nginx_chart_version
-  wait             = true
-  timeout          = 900
+module "load_balancer_controller_irsa_role" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
+  version = "~> 5.39"
+
+  role_name                              = "${var.cluster_name}-aws-load-balancer-controller"
+  attach_load_balancer_controller_policy = true
+
+  oidc_providers = {
+    ex = {
+      provider_arn               = module.eks.oidc_provider_arn
+      namespace_service_accounts = ["kube-system:aws-load-balancer-controller"]
+    }
+  }
+
+  tags = var.tags
+}
+
+resource "helm_release" "aws_load_balancer_controller" {
+  name       = "aws-load-balancer-controller"
+  namespace  = "kube-system"
+  repository = "https://aws.github.io/eks-charts"
+  chart      = "aws-load-balancer-controller"
+  version    = var.aws_load_balancer_controller_chart_version
+  wait       = true
+  timeout    = 600
 
   values = [yamlencode({
-    controller = {
-      replicaCount = 2
-      minAvailable = 1
-      topologySpreadConstraints = [
-        {
-          maxSkew           = 1
-          topologyKey       = "topology.kubernetes.io/zone"
-          whenUnsatisfiable = "ScheduleAnyway"
-          labelSelector = {
-            matchLabels = {
-              "app.kubernetes.io/name"      = "ingress-nginx"
-              "app.kubernetes.io/component" = "controller"
-            }
-          }
-        }
-      ]
-      service = {
-        type = "LoadBalancer"
-        annotations = {
-          "service.beta.kubernetes.io/aws-load-balancer-type"                              = "external"
-          "service.beta.kubernetes.io/aws-load-balancer-nlb-target-type"                   = "ip"
-          "service.beta.kubernetes.io/aws-load-balancer-scheme"                            = "internet-facing"
-          "service.beta.kubernetes.io/aws-load-balancer-ssl-cert"                          = aws_acm_certificate_validation.app.certificate_arn
-          "service.beta.kubernetes.io/aws-load-balancer-ssl-ports"                         = "https"
-          "service.beta.kubernetes.io/aws-load-balancer-backend-protocol"                  = "tcp"
-          "service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled" = "true"
-          "service.beta.kubernetes.io/aws-load-balancer-healthcheck-path"                  = "/healthz"
-          "service.beta.kubernetes.io/aws-load-balancer-healthcheck-port"                  = "10254"
-          "service.beta.kubernetes.io/aws-load-balancer-healthcheck-protocol"              = "HTTP"
-        }
-        targetPorts = {
-          http  = "http"
-          https = "http"
-        }
-      }
-      config = {
-        "use-forwarded-headers"  = "true"
-        "log-format-escape-json" = "true"
-        "log-format-upstream"    = "{\"timestamp\":\"$time_iso8601\",\"client_ip\":\"$remote_addr\",\"forwarded_for\":\"$proxy_add_x_forwarded_for\",\"host\":\"$host\",\"request_method\":\"$request_method\",\"uri\":\"$request_uri\",\"status\":$status,\"bytes_sent\":$bytes_sent,\"request_time\":$request_time,\"upstream_response_time\":\"$upstream_response_time\",\"upstream_status\":\"$upstream_status\",\"user_agent\":\"$http_user_agent\"}"
-      }
-      metrics = {
-        enabled = true
+    clusterName = module.eks.cluster_name
+    serviceAccount = {
+      create = true
+      name   = "aws-load-balancer-controller"
+      annotations = {
+        "eks.amazonaws.com/role-arn" = module.load_balancer_controller_irsa_role.iam_role_arn
       }
     }
+    region = var.aws_region
+    vpcId  = local.cluster_vpc_id
   })]
 
   depends_on = [
     module.eks,
-    aws_acm_certificate_validation.app
+    module.load_balancer_controller_irsa_role
   ]
-}
-
-# Wait for AWS to provision the NLB and assign a public hostname
-resource "time_sleep" "wait_for_ingress_lb" {
-  depends_on      = [helm_release.ingress_nginx]
-  create_duration = "45s"
-}
-
-data "kubernetes_service_v1" "ingress" {
-  metadata {
-    name      = "ingress-nginx-controller"
-    namespace = "ingress-nginx"
-  }
-
-  depends_on = [time_sleep.wait_for_ingress_lb]
-}
-
-resource "aws_route53_record" "app" {
-  zone_id         = local.route53_zone_id
-  name            = "${var.app_subdomain}.${var.domain_name}"
-  type            = "CNAME"
-  ttl             = 60
-  records         = [data.kubernetes_service_v1.ingress.status[0].load_balancer[0].ingress[0].hostname]
-  allow_overwrite = true
 }
 
 resource "kubernetes_deployment_v1" "app" {
@@ -483,17 +441,19 @@ resource "kubernetes_ingress_v1" "app" {
     name      = "demo-app"
     namespace = "default"
     annotations = {
-      # Since SSL is terminated at the AWS NLB and passed as HTTP to Ingress NGINX,
-      # ssl-redirect MUST be false to avoid an infinite 308 redirect loop.
-      "nginx.ingress.kubernetes.io/ssl-redirect"      = "false"
-      "nginx.ingress.kubernetes.io/limit-rps"         = "50"
-      "nginx.ingress.kubernetes.io/limit-connections" = "20"
-      "nginx.ingress.kubernetes.io/proxy-body-size"   = "10m"
+      "alb.ingress.kubernetes.io/scheme"               = "internet-facing"
+      "alb.ingress.kubernetes.io/target-type"          = "ip"
+      "alb.ingress.kubernetes.io/certificate-arn"      = aws_acm_certificate_validation.app.certificate_arn
+      "alb.ingress.kubernetes.io/listen-ports"         = "[{\"HTTP\": 80}, {\"HTTPS\": 443}]"
+      "alb.ingress.kubernetes.io/ssl-redirect"         = "443"
+      "alb.ingress.kubernetes.io/healthcheck-path"     = "/healthz"
+      "alb.ingress.kubernetes.io/healthcheck-port"     = "traffic-port"
+      "alb.ingress.kubernetes.io/healthcheck-protocol" = "HTTP"
     }
   }
 
   spec {
-    ingress_class_name = "nginx"
+    ingress_class_name = "alb"
 
     rule {
       host = "${var.app_subdomain}.${var.domain_name}"
@@ -517,9 +477,34 @@ resource "kubernetes_ingress_v1" "app" {
   }
 
   depends_on = [
-    helm_release.ingress_nginx,
-    kubernetes_service_v1.app
+    helm_release.aws_load_balancer_controller,
+    kubernetes_service_v1.app,
+    aws_acm_certificate_validation.app
   ]
+}
+
+# Wait for AWS Load Balancer Controller to provision the ALB and assign a public hostname
+resource "time_sleep" "wait_for_ingress_lb" {
+  depends_on      = [kubernetes_ingress_v1.app]
+  create_duration = "45s"
+}
+
+data "kubernetes_ingress_v1" "app" {
+  metadata {
+    name      = kubernetes_ingress_v1.app.metadata[0].name
+    namespace = kubernetes_ingress_v1.app.metadata[0].namespace
+  }
+
+  depends_on = [time_sleep.wait_for_ingress_lb]
+}
+
+resource "aws_route53_record" "app" {
+  zone_id         = local.route53_zone_id
+  name            = "${var.app_subdomain}.${var.domain_name}"
+  type            = "CNAME"
+  ttl             = 60
+  records         = [data.kubernetes_ingress_v1.app.status[0].load_balancer[0].ingress[0].hostname]
+  allow_overwrite = true
 }
 
 resource "kubernetes_network_policy_v1" "app_ingress_isolation" {
@@ -539,15 +524,8 @@ resource "kubernetes_network_policy_v1" "app_ingress_isolation" {
 
     ingress {
       from {
-        namespace_selector {
-          match_labels = {
-            "kubernetes.io/metadata.name" = "ingress-nginx"
-          }
-        }
-        pod_selector {
-          match_labels = {
-            "app.kubernetes.io/name" = "ingress-nginx"
-          }
+        ip_block {
+          cidr = local.create_vpc ? module.vpc[0].vpc_cidr_block : data.aws_vpc.selected[0].cidr_block
         }
       }
 

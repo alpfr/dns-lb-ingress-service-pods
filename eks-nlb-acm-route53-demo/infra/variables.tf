@@ -12,7 +12,7 @@ variable "cluster_name" {
 
 variable "vpc_id" {
   type        = string
-  description = "Optional existing VPC ID. If provided, EKS and NLB deploy into this VPC instead of creating a new one."
+  description = "Optional existing VPC ID. If provided, EKS and ALB deploy into this VPC instead of creating a new one."
   default     = ""
 }
 
@@ -45,10 +45,10 @@ variable "app_image" {
   description = "Container image URI including tag"
 }
 
-variable "ingress_nginx_chart_version" {
+variable "aws_load_balancer_controller_chart_version" {
   type        = string
-  description = "Helm chart version for ingress-nginx"
-  default     = "4.15.1"
+  description = "Helm chart version for aws-load-balancer-controller"
+  default     = "1.11.0"
 }
 
 variable "tags" {

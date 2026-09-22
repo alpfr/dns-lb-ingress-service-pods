@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# AWS EKS Auto Mode + NLB + Ingress NGINX + ACM + Route 53
+# AWS EKS Auto Mode + AWS ALB + AWS Load Balancer Controller + ACM + Route 53
 # Automated End-to-End Deployment Script
 # ==============================================================================
 
@@ -19,7 +19,7 @@ NC='\033[0m' # No Color
 
 print_banner() {
     echo -e "${BLUE}========================================================================${NC}"
-    echo -e "${BOLD}${CYAN}🚀 EKS Auto Mode + NLB + ACM + Route 53 Deployment Suite${NC}"
+    echo -e "${BOLD}${CYAN}🚀 EKS Auto Mode + AWS ALB + ACM + Route 53 Deployment Suite${NC}"
     echo -e "${BLUE}========================================================================${NC}"
 }
 
@@ -72,7 +72,7 @@ usage() {
 Usage: $(basename "$0") [OPTIONS]
 
 Automates the provisioning of EKS Auto Mode, S3 state backend, ECR repository,
-container build & push, Ingress NGINX with NLB TLS termination, and Route 53 DNS.
+container build & push, AWS ALB Ingress with ACM TLS termination, and Route 53 DNS.
 
 Options:
   -d, --domain DOMAIN       Route 53 public hosted zone name (default: alpfrtech.com)
@@ -408,7 +408,7 @@ vpc_id                      = "${VPC_ID}"
 domain_name                 = "${DOMAIN_NAME}"
 app_subdomain               = "${APP_SUBDOMAIN}"
 app_image                   = "${ECR_URI}"
-ingress_nginx_chart_version = "4.15.1"
+aws_load_balancer_controller_chart_version = "1.11.0"
 create_route53_zone         = ${CREATE_ROUTE53_ZONE}
 tags = {
   Environment = "Production"

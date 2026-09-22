@@ -3,7 +3,7 @@ cluster_name                = "demo-eks"
 domain_name                 = "alpfrtech.com"
 app_subdomain               = "app"
 app_image                   = "123456789012.dkr.ecr.us-east-1.amazonaws.com/demo-app:v1"
-ingress_nginx_chart_version = "4.15.1"
+aws_load_balancer_controller_chart_version = "1.11.0"
 create_route53_zone         = false
 
 # Optional: To deploy into an existing VPC instead of creating a new one:

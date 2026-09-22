@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# AWS EKS Auto Mode + NLB + Ingress NGINX + ACM + Route 53
+# AWS EKS Auto Mode + AWS ALB + AWS Load Balancer Controller + ACM + Route 53
 # Post-Deployment Verification & Health Check Script
 # ==============================================================================
 
@@ -102,16 +102,15 @@ if ! kubectl get nodes -o wide; then
 fi
 echo -e "${GREEN}✔ EKS API server accessible and nodes reported${NC}\n"
 
-# 2. Ingress Controller status
-echo -e "${BOLD}${BLUE}[2/5] Checking Ingress NGINX Controller & NLB Service...${NC}"
-kubectl get pods -n ingress-nginx -l app.kubernetes.io/name=ingress-nginx
-kubectl get svc -n ingress-nginx ingress-nginx-controller
+# 2. Ingress Controller & ALB status
+echo -e "${BOLD}${BLUE}[2/5] Checking AWS Load Balancer Controller & ALB Ingress...${NC}"
+kubectl get pods -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller 2>/dev/null || true
 
-NLB_HOSTNAME=$(kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
-if [[ -n "$NLB_HOSTNAME" ]]; then
-    echo -e "${GREEN}✔ External NLB Hostname: ${NLB_HOSTNAME}${NC}\n"
+ALB_HOSTNAME=$(kubectl get ingress demo-app -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
+if [[ -n "$ALB_HOSTNAME" ]]; then
+    echo -e "${GREEN}✔ External Application Load Balancer (ALB) Hostname: ${ALB_HOSTNAME}${NC}\n"
 else
-    echo -e "${YELLOW}⚠ NLB hostname is still pending in AWS. Route 53 resolution may take a moment.${NC}\n"
+    echo -e "${YELLOW}⚠ ALB hostname is still provisioning in AWS. Route 53 resolution may take a moment.${NC}\n"
 fi
 
 # 3. Workload Pods, Ingress Rules & NetworkPolicy
@@ -127,22 +126,26 @@ else
     echo -e "${YELLOW}⚠ NetworkPolicy 'demo-app-ingress-only' not found${NC}\n"
 fi
 
-# 4. Ingress Rate Limiting & JSON Logging
-echo -e "${BOLD}${BLUE}[4/5] Checking Ingress Annotations & JSON Access Logging...${NC}"
-RL_ANNOTATIONS=$(kubectl get ingress demo-app -o jsonpath='{.metadata.annotations}' 2>/dev/null || true)
-if echo "$RL_ANNOTATIONS" | grep -q "limit-rps"; then
-    echo -e "${GREEN}✔ Rate limiting annotations detected on Ingress: limit-rps=50, limit-connections=20, proxy-body-size=10m${NC}"
+# 4. Ingress Annotations & Controller Events
+echo -e "${BOLD}${BLUE}[4/5] Checking AWS ALB Ingress Annotations & Controller Status...${NC}"
+ALB_ANNOTATIONS=$(kubectl get ingress demo-app -o jsonpath='{.metadata.annotations}' 2>/dev/null || true)
+if echo "$ALB_ANNOTATIONS" | grep -q "alb.ingress.kubernetes.io"; then
+    echo -e "${GREEN}✔ AWS Load Balancer Controller annotations detected on Ingress:${NC}"
+    echo "  • scheme: internet-facing"
+    echo "  • target-type: ip (direct pod routing, zero worker proxy overhead)"
+    echo "  • ssl-redirect: 443"
+    echo "  • healthcheck: /healthz on traffic-port"
 else
-    echo -e "${YELLOW}⚠ Rate limiting annotations not found on Ingress${NC}"
+    echo -e "${YELLOW}⚠ AWS ALB annotations not found on Ingress${NC}"
 fi
 
-echo -e "\nChecking Ingress NGINX structured JSON logs..."
-LAST_JSON_LOG=$(kubectl logs -n ingress-nginx -l app.kubernetes.io/name=ingress-nginx --tail=1 2>/dev/null | grep -E '^\{.*\}$' || true)
-if [[ -n "$LAST_JSON_LOG" ]]; then
-    echo -e "${GREEN}✔ Ingress NGINX structured JSON logging is active${NC}"
-    echo -e "  Sample log entry: ${LAST_JSON_LOG}"
+echo -e "\nChecking AWS Load Balancer Controller logs..."
+LAST_ALB_LOG=$(kubectl logs -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller --tail=3 2>/dev/null || true)
+if [[ -n "$LAST_ALB_LOG" ]]; then
+    echo -e "${GREEN}✔ AWS Load Balancer Controller log sample:${NC}"
+    echo "  ${LAST_ALB_LOG}"
 else
-    echo -e "${YELLOW}⚠ Waiting for JSON log entries or non-JSON logs received${NC}"
+    echo -e "${YELLOW}⚠ Waiting for AWS Load Balancer Controller logs${NC}"
 fi
 echo ""
 

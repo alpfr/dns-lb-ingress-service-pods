@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# AWS EKS Auto Mode + NLB + Ingress NGINX + ACM + Route 53
+# AWS EKS Auto Mode + AWS ALB + AWS Load Balancer Controller + ACM + Route 53
 # Teardown and Resource Cleanup Script
 # ==============================================================================
 
@@ -29,7 +29,7 @@ usage() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Safely tears down the EKS cluster, NLB, Route 53 records, and optionally cleans
+Safely tears down the EKS cluster, ALB, Route 53 records, and optionally cleans
 up the ECR image repository and remote S3 state bucket.
 
 Options:
@@ -79,10 +79,10 @@ echo -e "${BOLD}${RED}⚠ WARNING: Infrastructure Teardown${NC}"
 echo -e "${RED}========================================================================${NC}"
 echo "This action will permanently destroy:"
 echo "  • EKS Auto Mode Cluster and Compute Instances"
-echo "  • AWS Network Load Balancer (NLB)"
+echo "  • AWS Application Load Balancer (ALB)"
 echo "  • Route 53 DNS Records"
 echo "  • ACM TLS Certificate"
-echo "  • Ingress NGINX Helm Release & Microservice Pods"
+echo "  • AWS Load Balancer Controller & Microservice Pods"
 if [[ -f "${INFRA_DIR}/terraform.tfvars" ]] && grep -qE '^\s*vpc_id\s*=\s*"vpc-' "${INFRA_DIR}/terraform.tfvars"; then
     VPC_USED=$(grep -E '^\s*vpc_id\s*=' "${INFRA_DIR}/terraform.tfvars" | head -n 1 | awk -F'=' '{print $2}' | tr -d ' "')
     echo -e "${GREEN}  • Existing VPC (${VPC_USED}) is PRESERVED and will NOT be modified or destroyed.${NC}"

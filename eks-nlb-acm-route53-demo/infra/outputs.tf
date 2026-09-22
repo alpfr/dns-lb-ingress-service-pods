@@ -13,9 +13,24 @@ output "cluster_endpoint" {
   value       = module.eks.cluster_endpoint
 }
 
+output "alb_hostname" {
+  description = "Hostname of the AWS Application Load Balancer provisioned by the AWS Load Balancer Controller"
+  value       = try(data.kubernetes_ingress_v1.app.status[0].load_balancer[0].ingress[0].hostname, null)
+}
+
 output "nlb_hostname" {
-  description = "Hostname of the AWS Network Load Balancer provisioned for Ingress NGINX"
-  value       = try(data.kubernetes_service_v1.ingress.status[0].load_balancer[0].ingress[0].hostname, null)
+  description = "Legacy alias for alb_hostname pointing to the provisioned AWS Load Balancer"
+  value       = try(data.kubernetes_ingress_v1.app.status[0].load_balancer[0].ingress[0].hostname, null)
+}
+
+output "ingress_class" {
+  description = "Kubernetes Ingress class utilized for routing"
+  value       = "alb"
+}
+
+output "load_balancer_type" {
+  description = "Type of AWS Load Balancer managing external ingress"
+  value       = "AWS Application Load Balancer"
 }
 
 output "ecr_note" {

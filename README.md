@@ -12,6 +12,10 @@ A production-grade, enterprise-hardened Terraform starter demonstrating automate
 ---
 
 ## Architecture Overview
+ 
+<p align="center">
+  <img src="docs/images/architecture.png" alt="AWS EKS ALB Ingress Architecture Diagram" width="100%" />
+</p>
 
 ```
                                       AWS CLOUD INFRASTRUCTURE

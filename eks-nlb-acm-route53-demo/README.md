@@ -8,7 +8,11 @@ This module contains the complete, production-ready implementation of an **Amazo
 
 ---
 
-## Traffic Flow
+## Architecture & Traffic Flow
+
+<p align="center">
+  <img src="docs/images/architecture.png" alt="AWS EKS ALB Ingress Architecture Diagram" width="100%" />
+</p>
 
 ```
 [Internet Client]

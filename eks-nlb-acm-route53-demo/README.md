@@ -6,12 +6,20 @@
 
 This module contains the complete, production-ready implementation of an **Amazon EKS Auto Mode** cluster with automated **AWS Application Load Balancer (ALB)** provisioning, ACM TLS termination, direct pod routing (`target-type: ip`) managed by the **AWS Load Balancer Controller**, and Route 53 public DNS integration.
 
+> **🌐 Live Application URL**: **[https://app.alpfrtech.com](https://app.alpfrtech.com)**  
+> **Telemetry & Observability**: [Liveness Probe](https://app.alpfrtech.com/healthz) • [Readiness Probe](https://app.alpfrtech.com/ready) • [Cluster Telemetry](https://app.alpfrtech.com/api/info) • [Prometheus Metrics](https://app.alpfrtech.com/metrics)
+
 ---
 
-## Architecture & Traffic Flow
+## Architecture & Live Dashboard
 
 <p align="center">
   <img src="docs/images/architecture.png" alt="AWS EKS ALB Ingress Architecture Diagram" width="100%" />
+</p>
+
+### Live Application Telemetry Dashboard
+<p align="center">
+  <img src="docs/images/dashboard.png" alt="Live EKS Microservice Telemetry Dashboard" width="100%" />
 </p>
 
 ```
@@ -70,14 +78,21 @@ eks-nlb-acm-route53-demo/
 │   ├── variables.tf                   # Region and bucket prefix variables
 │   └── versions.tf                    # AWS provider constraints
 ├── infra/                             # Core infrastructure and Kubernetes workloads
-│   ├── main.tf                        # VPC (conditional), EKS, ACM, Ingress-NGINX, Route 53, K8s manifests
+│   ├── main.tf                        # VPC (conditional), EKS Auto Mode, ACM, AWS Load Balancer Controller (ALB), Route 53, HPA, PDB
 │   ├── variables.tf                   # Input variable definitions (domain_name, vpc_id, subnet_ids)
-│   ├── outputs.tf                     # Output endpoints, VPC ID, and connection data
+│   ├── outputs.tf                     # Output endpoints, VPC ID, and ALB connection data
 │   ├── versions.tf                    # Terraform, AWS, Kubernetes, Helm, Time provider constraints
 │   ├── backend.tf.example             # Template for S3 remote backend
 │   └── terraform.tfvars.example       # Template for environment input variables
-└── app/                               # Python Flask microservice
-    ├── app.py                         # Application logic with / and /healthz endpoints
+└── app/                               # Enterprise Python Flask Full-Stack Microservice
+    ├── app.py                         # Application logic with /healthz, /ready, /api/info, /api/headers, /metrics
+    ├── templates/
+    │   └── dashboard.html             # Glassmorphic responsive dark-mode telemetry web dashboard
+    ├── static/
+    │   ├── css/styles.css             # Custom Vanilla CSS design tokens & animations
+    │   └── js/dashboard.js            # Auto-refresh polling, RTT ping, and API explorer
+    ├── tests/
+    │   └── test_app.py                # Comprehensive pytest test suite (7/7 unit tests)
     ├── Dockerfile                     # Multi-stage, non-root hardened container
     ├── requirements.txt               # Flask and Gunicorn runtime dependencies
     └── .dockerignore                  # Docker build exclusions
@@ -141,7 +156,7 @@ cd ../app
 
 AWS_REGION="us-east-1"
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-ECR_URI="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/demo-app:v1"
+ECR_URI="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/demo-app:v2"
 
 # 1. Create ECR repo
 aws ecr create-repository --repository-name demo-app --region "$AWS_REGION" 2>/dev/null || true
@@ -150,8 +165,8 @@ aws ecr create-repository --repository-name demo-app --region "$AWS_REGION" 2>/d
 aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
 # 3. Build and push image
-docker build -t demo-app:v1 .
-docker tag demo-app:v1 "$ECR_URI"
+docker build --platform linux/amd64 -t demo-app:v2 .
+docker tag demo-app:v2 "$ECR_URI"
 docker push "$ECR_URI"
 
 echo "Image published to: $ECR_URI"
@@ -175,12 +190,12 @@ cp terraform.tfvars.example terraform.tfvars
 ```
 Update `terraform.tfvars`:
 ```hcl
-aws_region                  = "us-east-1"
-cluster_name                = "demo-eks"
-domain_name                 = "alpfrtech.com"    # Your Route 53 domain
-app_subdomain               = "app"              # Yields app.alpfrtech.com
-app_image                   = "<ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/demo-app:v1"
-ingress_nginx_chart_version = "4.15.1"
+aws_region                                 = "us-east-1"
+cluster_name                               = "demo-eks"
+domain_name                                = "alpfrtech.com"    # Your Route 53 domain
+app_subdomain                              = "app"              # Yields app.alpfrtech.com
+app_image                                  = "<ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/demo-app:v2"
+aws_load_balancer_controller_chart_version = "1.11.0"
 tags = {
   Environment = "Production"
   Project     = "EKS-Demo"
@@ -205,12 +220,15 @@ terraform apply tfplan
 # Update kubeconfig
 aws eks update-kubeconfig --region us-east-1 --name demo-eks
 
-# Check pod and ingress status
+# Check pod, ingress, and controller status
 kubectl get pods,svc,ingress -A
 
-# Test the public HTTPS endpoints
+# Test the live HTTPS endpoints
 curl -i https://app.alpfrtech.com/healthz
+curl -i https://app.alpfrtech.com/ready
+curl -s https://app.alpfrtech.com/api/info | jq .
 curl -i https://app.alpfrtech.com/
+curl -s https://app.alpfrtech.com/metrics
 ```
 
 ---
@@ -231,7 +249,8 @@ terraform destroy -auto-approve
 
 | Issue | Cause | Fix |
 | :--- | :--- | :--- |
-| `ERR_TOO_MANY_REDIRECTS` | Ingress SSL redirect loop | Ensure `"nginx.ingress.kubernetes.io/ssl-redirect" = "false"`. |
-| Ingress Hostname Empty | Asynchronous NLB creation | Wait for `time_sleep.wait_for_ingress_lb` (45s). |
+| `Could not resolve host` (curl 6) | DNS caching / propagation | Flush local DNS resolver cache (`dscacheutil -flushcache`) or query recursive DNS (`dig @1.1.1.1 app.alpfrtech.com`). |
+| ALB Target `Unhealthy` | Port or healthcheck path mismatch | Verify container listens on port 8080 and `/healthz` responds with HTTP 200. Inspect via `aws elbv2 describe-target-health`. |
+| Ingress Hostname Empty | Asynchronous ALB creation | `time_sleep.wait_for_ingress_lb` (45s) ensures the ALB hostname is provisioned before Route 53 CNAME creation. |
 | Dynamic 401 Auth Error | Expired static token | Providers use dynamic `exec` authentication with `aws eks get-token`. |
-| Pod CrashLoopBackOff | Application binding error | App binds to `0.0.0.0:$PORT` (8080) and has valid health probes on `/healthz`. |
+| Pod CrashLoopBackOff | Application binding error | App binds to `0.0.0.0:$PORT` (8080) and has valid health probes on `/healthz` and `/ready`. |

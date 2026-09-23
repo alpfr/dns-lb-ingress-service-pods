@@ -9,12 +9,20 @@
 
 A production-grade, enterprise-hardened Terraform starter demonstrating automated end-to-end traffic ingress on **Amazon EKS Auto Mode**, routing from a custom Route 53 domain through an **AWS Application Load Balancer (ALB)** with **AWS Certificate Manager (ACM)** TLS termination, managed directly via the **AWS Load Balancer Controller**, routing traffic with zero worker-node proxy overhead straight to microservice pod IPs (`target-type: ip`).
 
+> **🌐 Live Application URL**: **[https://app.alpfrtech.com](https://app.alpfrtech.com)**  
+> **Telemetry & Observability**: [Liveness Probe](https://app.alpfrtech.com/healthz) • [Readiness Probe](https://app.alpfrtech.com/ready) • [Cluster Telemetry](https://app.alpfrtech.com/api/info) • [Prometheus Metrics](https://app.alpfrtech.com/metrics)
+
 ---
 
-## Architecture Overview
- 
+## Architecture & Live Dashboard
+
 <p align="center">
   <img src="docs/images/architecture.png" alt="AWS EKS ALB Ingress Architecture Diagram" width="100%" />
+</p>
+
+### Live Application Telemetry Dashboard
+<p align="center">
+  <img src="docs/images/dashboard.png" alt="Live EKS Microservice Telemetry Dashboard" width="100%" />
 </p>
 
 ```
@@ -71,7 +79,7 @@ A production-grade, enterprise-hardened Terraform starter demonstrating automate
  │   │   • Read-Only Root Filesystem (with /tmp emptyDir)                                      │   │
  │   │   • Seccomp Profile: RuntimeDefault                                                     │   │
  │   │   • Horizontal Pod Autoscaler: CPU 70%, Memory 80%                                      │   │
- │   │   • HTTP Endpoints: / (Root JSON status), /healthz (Liveness & Readiness probe)         │   │
+ │   │   • HTTP Endpoints: / (Interactive Dashboard), /healthz, /ready, /api/info, /metrics    │   │
  │   └─────────────────────────────────────────────────────────────────────────────────────────┘   │
  └─────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -184,15 +192,23 @@ dns-lb-ingress-service-pods/
     │   ├── variables.tf                       # Region and bucket prefix variables
     │   └── versions.tf                        # Terraform and AWS provider constraints
     ├── infra/                                 # Main infrastructure & workload module
-    │   ├── main.tf                            # VPC, EKS, ACM, Ingress-NGINX (2x, PDB), Route 53, HPA, PDB
+    │   ├── main.tf                            # VPC, EKS Auto Mode, ACM, AWS Load Balancer Controller (ALB), Route 53, HPA, PDB
     │   ├── variables.tf                       # Configurable parameters (domain, region, image, tags)
-    │   ├── outputs.tf                         # Application URL, cluster endpoint, NLB hostname
+    │   ├── outputs.tf                         # Application URL, cluster endpoint, ALB hostname
     │   ├── versions.tf                        # Provider requirements (aws, kubernetes, helm, time)
     │   ├── backend.tf.example                 # Template for remote S3 state configuration
-    └── app/                                   # Containerized Python Flask microservice
-        ├── app.py                             # Application source code with / and /healthz endpoints
+    │   └── terraform.tfvars.example           # Template for environment variables
+    └── app/                                   # Enterprise Python Flask Full-Stack Microservice
+        ├── app.py                             # Microservice source code (/healthz, /ready, /api/info, /api/headers, /metrics)
+        ├── templates/
+        │   └── dashboard.html                 # Glassmorphic responsive dark-mode telemetry web dashboard
+        ├── static/
+        │   ├── css/styles.css                 # Custom Vanilla CSS design tokens & animations
+        │   └── js/dashboard.js                # Auto-refresh polling, RTT ping, and API explorer
+        ├── tests/
+        │   └── test_app.py                    # Comprehensive pytest test suite (7/7 unit tests)
         ├── Dockerfile                         # Multi-stage, non-root hardened container image
-        ├── requirements.txt                   # Flask and Gunicorn runtime dependencies
+        ├── requirements.txt                   # Flask, Gunicorn, and runtime dependencies
         └── .dockerignore                      # Build context ignore rules
 ```
 
@@ -220,9 +236,9 @@ cd dns-lb-ingress-service-pods
 
 | Script | Purpose | Example Command |
 | :--- | :--- | :--- |
-| **`scripts/deploy.sh`** | Full end-to-end automation: auto-discovers healthy VPCs in region, bootstraps S3 state bucket, creates ECR repo, builds & pushes image, configures backend/tfvars, applies Terraform, and verifies | `./scripts/deploy.sh --vpc-id vpc-04069dd8bf42ea2db -y` |
-| **`scripts/verify.sh`** | Runs cluster connectivity, node status, Ingress controller NLB status, VPC verification, and probes `/healthz` and `/` endpoints | `./scripts/verify.sh -d alpfrtech.com` |
-| **`scripts/destroy.sh`** | Safely tears down the EKS cluster, NLB, Route 53 records (preserves existing VPC intact), with options to delete ECR image repo and S3 state bucket | `./scripts/destroy.sh -y --delete-ecr` |
+| **`scripts/deploy.sh`** | Full end-to-end automation: auto-discovers healthy VPCs in region, bootstraps S3 state bucket, builds & pushes container to ECR, configures backend/tfvars, applies Terraform (ALB, EKS Auto Mode, ACM, DNS), and verifies | `./scripts/deploy.sh --vpc-id vpc-04069dd8bf42ea2db -y` |
+| **`scripts/verify.sh`** | 5-stage verification suite: cluster connectivity, AWS Load Balancer Controller, ALB Ingress annotations, NetworkPolicy, and probes live HTTPS endpoints (`/`, `/healthz`, `/ready`, `/api/info`) | `./scripts/verify.sh -d alpfrtech.com` |
+| **`scripts/destroy.sh`** | Safely tears down EKS cluster, ALB, Route 53 CNAME, and ACM certificate (preserves existing VPC intact), with options to delete ECR image repo and S3 state bucket | `./scripts/destroy.sh -y --delete-ecr` |
 
 ---
 
@@ -351,7 +367,7 @@ tags = {
 
 ### Step 4: Provision Infrastructure & Workload
 
-Execute Terraform to deploy the VPC, EKS Auto Mode cluster, ACM certificate with DNS validation, Ingress NGINX Helm chart, Route 53 CNAME, and Kubernetes deployment:
+Execute Terraform to deploy the VPC, EKS Auto Mode cluster, ACM certificate with DNS validation, AWS Load Balancer Controller Helm release, Route 53 CNAME, and Kubernetes deployment:
 
 ```bash
 # 1. Initialize Terraform providers and remote state
@@ -379,44 +395,49 @@ aws eks update-kubeconfig --region us-east-1 --name demo-eks
 
 #### 2. Inspect Ingress & Pod Status
 ```bash
-# Verify pods are in Running state
+# Verify microservice pods are in Running state
 kubectl get pods -l app=demo-app -o wide
 
-# Verify Ingress NGINX controller has an assigned external LoadBalancer hostname
-kubectl get svc -n ingress-nginx ingress-nginx-controller
+# Verify AWS Load Balancer Controller is running in kube-system
+kubectl get pods -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller
 
-# Verify Ingress routing rule and rate limiting annotations
+# Verify ALB Ingress has been assigned an external LoadBalancer address
 kubectl get ingress demo-app
+
+# Inspect AWS ALB Ingress annotations (scheme, target-type: ip, ssl-redirect)
 kubectl get ingress demo-app -o jsonpath='{.metadata.annotations}'
 
-# Verify Zero-Trust NetworkPolicy isolation
+# Verify Zero-Trust NetworkPolicy isolation (restricting port 8080 strictly to VPC CIDR)
 kubectl get networkpolicy -n default demo-app-ingress-only
 
-# Verify Ingress NGINX structured JSON access logs
-kubectl logs -n ingress-nginx -l app.kubernetes.io/name=ingress-nginx --tail=5
+# Verify AWS Load Balancer Controller reconciliation logs
+kubectl logs -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller --tail=5
 ```
 
-#### 3. Test DNS Resolution and Public HTTPS Endpoints
+#### 3. Test Live HTTPS Endpoints
 ```bash
-# Query the live application health probe
+# 1. Query the live application health probe (Liveness Probe)
 curl -i https://app.alpfrtech.com/healthz
 
 # Expected Response:
 # HTTP/2 200
-# content-type: application/json
-# {"status":"ok"}
+# {"pod":"demo-app-fc8c5454f-jbrdt","service":"demo-app","status":"healthy","uptime_seconds":190.18,"version":"2.0.0"}
 
-# Query the root endpoint
-curl -i https://app.alpfrtech.com/
+# 2. Query the readiness probe
+curl -i https://app.alpfrtech.com/ready
 
 # Expected Response:
 # HTTP/2 200
-# content-type: application/json
-# {
-#   "message": "Hello from Kubernetes on AWS",
-#   "pod": "demo-app-xxxxxxxxxx-xxxxx",
-#   "status": "running"
-# }
+# {"pod":"demo-app-fc8c5454f-bzhdb","service":"demo-app","status":"ready","version":"2.0.0"}
+
+# 3. Query the cluster & ingress telemetry payload
+curl -s https://app.alpfrtech.com/api/info | jq .
+
+# 4. Query the interactive dashboard (or open in any browser)
+curl -i https://app.alpfrtech.com/
+
+# 5. Query Prometheus metrics
+curl -s https://app.alpfrtech.com/metrics
 ```
 
 ---
@@ -426,7 +447,7 @@ curl -i https://app.alpfrtech.com/
 To remove all provisioned cloud resources and prevent ongoing AWS charges:
 
 ```bash
-# 1. Destroy infrastructure, EKS cluster, NLB, and Route 53 records
+# 1. Destroy infrastructure, EKS cluster, ALB, and Route 53 records
 cd eks-nlb-acm-route53-demo/infra
 terraform destroy -auto-approve
 
@@ -443,13 +464,13 @@ terraform destroy -auto-approve
 
 | Topic | Repository Default | Enterprise Recommendations |
 | :--- | :--- | :--- |
-| **Ingress High Availability** | 2 replicas, `minAvailable: 1` PDB, multi-AZ spread | Scale to 3+ replicas across 3 availability zones for high-throughput enterprise workloads. |
-| **Zero-Trust Network Isolation** | Ingress restricted to `ingress-nginx` via NetworkPolicy | Add Calico or AWS VPC CNI egress policies to prevent unauthorized outbound connections. |
-| **Layer 7 Rate Limiting** | 50 rps, 20 connections, 10MB payload | Adjust thresholds in `kubernetes_ingress_v1.app` per API endpoint SLA requirements. |
-| **Observability** | Structured JSON access logs with upstream latency metrics | Route container logs to Amazon CloudWatch Container Insights or AWS OpenSearch via FluentBit. |
-| **ACM TLS Certificates** | Subdomain (`app.alpfrtech.com`), apex (`alpfrtech.com`), and wildcard (`*.alpfrtech.com`) | Configure automated Route 53 DNS failover or CloudFront CDN edge distribution. |
-| **ECR Image Security** | Automated CVE scan on push, 14-day untagged prune, 10 tagged image retention | Integrate AWS Inspector continuous container vulnerability scanning and signing with Cosign. |
-| **NAT Gateways** | `single_nat_gateway = true` (Cost-optimized) | Set `single_nat_gateway = false` and `one_nat_gateway_per_az = true` for high availability across AZs. |
+| **Ingress High Availability** | AWS ALB (Multi-AZ public subnets), AWS Load Balancer Controller (2 replicas in `kube-system`) | Scale microservice pods to 5+ replicas across 3 availability zones for high-throughput workloads. |
+| **Zero-Trust Network Isolation** | Ingress restricted strictly to VPC CIDR via NetworkPolicy `demo-app-ingress-only` | Add Calico or AWS VPC CNI egress policies to restrict external pod egress to authorized endpoints. |
+| **Direct Pod Routing** | `alb.ingress.kubernetes.io/target-type: ip` | Eliminates worker-node proxy overhead and routes directly from ALB to Pod IP in private subnets. |
+| **Observability** | Glassmorphic Telemetry Dashboard, Prometheus `/metrics`, and `/api/info` | Route container logs to Amazon CloudWatch Container Insights or AWS OpenSearch via FluentBit. |
+| **ACM TLS Certificates** | Subdomain (`app.alpfrtech.com`), apex (`alpfrtech.com`), and wildcard (`*.alpfrtech.com`) | Configure automated Route 53 DNS failover or AWS CloudFront edge caching. |
+| **ECR Image Security** | Automated CVE scan on push, 14-day untagged prune, 10 tagged image retention | Integrate AWS Inspector continuous container vulnerability scanning and image signing with Cosign. |
+| **NAT Gateways** | `single_nat_gateway = true` (Cost-optimized) | Set `single_nat_gateway = false` and `one_nat_gateway_per_az = true` for multi-AZ NAT fault tolerance. |
 
 ---
 
@@ -457,9 +478,10 @@ terraform destroy -auto-approve
 
 | Issue | Root Cause | Resolution |
 | :--- | :--- | :--- |
-| **Browser: `ERR_TOO_MANY_REDIRECTS`** | Ingress controller enforces SSL redirect while receiving plain HTTP from the NLB. | Verify `nginx.ingress.kubernetes.io/ssl-redirect: "false"` is set on `kubernetes_ingress_v1.app`. |
+| **`Could not resolve host` (curl error 6)** | DNS propagation delay from recently created Route 53 record. | Flush local DNS resolver cache (`dscacheutil -flushcache`) or query public recursive DNS (`dig @1.1.1.1 app.alpfrtech.com`). |
+| **ALB Targets `Unhealthy`** | Container port mismatch or health check failure. | Verify pod is listening on port 8080 and `/healthz` returns HTTP 200. Inspect with `aws elbv2 describe-target-health`. |
 | **ACM Validation Pending** | Route 53 DNS record does not match ACM challenge string or nameservers are inactive. | Inspect Route 53 hosted zone NS records with `dig NS alpfrtech.com` to ensure public delegation is active. |
-| **Terraform Plan: Status Hostname Empty** | NLB was queried before AWS assigned a public DNS name. | Ensure `time_sleep.wait_for_ingress_lb` (45s) is declared as a dependency before `data.kubernetes_service_v1.ingress`. |
+| **Terraform Plan: Status Hostname Empty** | ALB was queried before AWS assigned a public DNS name. | Ensure `time_sleep.wait_for_ingress_lb` (45s) is declared as a dependency before `data.kubernetes_ingress_v1.app`. |
 | **`401 Unauthorized` during apply** | Static EKS token expired during long cluster creation. | Ensure `kubernetes` and `helm` providers use dynamic `exec` authentication (`aws eks get-token`). |
 | **`ImagePullBackOff` on Pods** | ECR repository does not exist, container image was not pushed, or IAM role lacks ECR pull permissions. | Verify image was pushed using `aws ecr list-images --repository-name demo-app` and tag matches `app_image`. |
 

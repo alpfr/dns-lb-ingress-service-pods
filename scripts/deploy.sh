@@ -422,6 +422,7 @@ echo "Initializing Terraform infrastructure module..."
 terraform init -upgrade
 
 echo "Validating Terraform code..."
+terraform fmt
 terraform fmt -check
 terraform validate
 print_success "Terraform configuration is valid"

@@ -82,8 +82,9 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+PLATFORM_UPPER=$(echo "$PLATFORM" | tr '[:lower:]' '[:upper:]')
 echo -e "${RED}========================================================================${NC}"
-echo -e "${BOLD}${RED}⚠ WARNING: Infrastructure Teardown (${PLATFORM^^})${NC}"
+echo -e "${BOLD}${RED}⚠ WARNING: Infrastructure Teardown (${PLATFORM_UPPER})${NC}"
 echo -e "${RED}========================================================================${NC}"
 
 if [[ "$PLATFORM" == "rke2" ]]; then

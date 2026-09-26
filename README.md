@@ -1,13 +1,16 @@
-# AWS EKS Auto Mode + AWS ALB + AWS Load Balancer Controller + ACM + Route 53
+# AWS Kubernetes Ingress Architecture: RKE2 on EC2 & EKS Auto Mode (ALB + NLB + ACM + Route 53)
 
 [![CI Pipeline](https://github.com/alpfr/dns-lb-ingress-service-pods/actions/workflows/ci.yml/badge.svg)](https://github.com/alpfr/dns-lb-ingress-service-pods/actions/workflows/ci.yml)
+[![RKE2](https://img.shields.io/badge/Kubernetes-RKE2%20on%20EC2-1D63ED?logo=rancher&logoColor=white)](https://docs.rke2.io/)
 [![AWS](https://img.shields.io/badge/AWS-EKS%20Auto%20Mode-FF9900?logo=amazon-aws&logoColor=white)](https://aws.amazon.com/eks/)
 [![Terraform](https://img.shields.io/badge/Terraform-%3E%3D%201.10.0-844FBA?logo=terraform&logoColor=white)](https://www.terraform.io/)
-[![ALB](https://img.shields.io/badge/Ingress-AWS%20ALB%20Controller-009639?logo=amazon-aws&logoColor=white)](https://aws.github.io/eks-charts)
+[![ALB](https://img.shields.io/badge/Ingress-AWS%20ALB%20to%20Workers-009639?logo=amazon-aws&logoColor=white)](https://aws.amazon.com/elasticloadbalancing/)
 [![Route 53](https://img.shields.io/badge/DNS-Route%2053-232F3E?logo=amazon-route53&logoColor=white)](https://aws.amazon.com/route53/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-A production-grade, enterprise-hardened Terraform starter demonstrating automated end-to-end traffic ingress on **Amazon EKS Auto Mode**, routing from a custom Route 53 domain through an **AWS Application Load Balancer (ALB)** with **AWS Certificate Manager (ACM)** TLS termination, managed directly via the **AWS Load Balancer Controller**, routing traffic with zero worker-node proxy overhead straight to microservice pod IPs (`target-type: ip`).
+A production-grade, enterprise-hardened Terraform and Kubernetes ingress architecture demonstrating both:
+1. **Enterprise Standard (Network Team Recommendation)**: **RKE2 (Rancher Kubernetes Engine 2) on AWS EC2** with two-tier load balancing (Public ALB targeting Worker Nodes on port 80/443 with `target_type = "instance"` + Internal NLB for Control Plane on 6443/9345).
+2. **Cloud-Native Managed**: Automated end-to-end traffic ingress on **Amazon EKS Auto Mode** routing from Route 53 through an **AWS Application Load Balancer (ALB)** with **AWS Certificate Manager (ACM)** TLS termination straight to microservice pod IPs (`target-type: ip`).
 
 > **🌐 Live Application URL**: **[https://app.alpfrtech.com](https://app.alpfrtech.com)**  
 > **Telemetry & Observability**: [Liveness Probe](https://app.alpfrtech.com/healthz) • [Readiness Probe](https://app.alpfrtech.com/ready) • [Cluster Telemetry](https://app.alpfrtech.com/api/info) • [Prometheus Metrics](https://app.alpfrtech.com/metrics)
@@ -16,75 +19,200 @@ A production-grade, enterprise-hardened Terraform starter demonstrating automate
 
 ## Architecture & Live Dashboard
 
+This repository provides production-tested reference architectures for two primary AWS Kubernetes deployment paradigms:
+
+- **Topology A (Enterprise Production / Network Team Recommendation)**: **RKE2 on AWS EC2** with **Two-Tier Load Balancing**—a Public Layer-7 **Application Load Balancer (ALB)** targeting EC2 Worker Nodes (`target_type = "instance"`) on ports 80/443 running `rke2-ingress-nginx`, and an Internal Layer-4 **Network Load Balancer (NLB)** targeting Control Plane Master Nodes on ports 6443/9345.
+- **Topology B (Cloud-Native Managed Control Plane)**: **Amazon EKS Auto Mode** with the **AWS Load Balancer Controller**, terminating TLS at the ALB and routing directly to microservice pod IPs (`target-type: ip`) across VPC subnets.
+
+---
+
+### Visual Architecture Diagrams
+
+#### 1. RKE2 Enterprise Two-Tier Load Balancing Architecture (EC2 Worker Ingress)
 <p align="center">
-  <img src="docs/images/architecture.png" alt="AWS EKS ALB Ingress Architecture Diagram" width="100%" />
+  <img src="docs/images/rke2_architecture.png" alt="RKE2 Two-Tier Load Balancing on AWS EC2 Architecture Diagram" width="100%" />
 </p>
 
-### Live Application Telemetry Dashboard
+#### 2. Amazon EKS Auto Mode Direct Pod IP Architecture
 <p align="center">
-  <img src="docs/images/dashboard.png" alt="Live EKS Microservice Telemetry Dashboard" width="100%" />
+  <img src="docs/images/architecture.png" alt="AWS EKS ALB Direct Pod Ingress Architecture Diagram" width="100%" />
 </p>
+
+#### 3. Live Application Telemetry Dashboard
+<p align="center">
+  <img src="docs/images/dashboard.png" alt="Live Kubernetes Microservice Telemetry Dashboard" width="100%" />
+</p>
+
+---
+
+### Pattern 1: RKE2 Enterprise Architecture Diagram (Network Team Recommendation)
 
 ```
-                                      AWS CLOUD INFRASTRUCTURE
+                                       AWS CLOUD INFRASTRUCTURE (VPC)
  ───────────────────────────────────────────────────────────────────────────────────────────────────
-                                         
-   [Internet Client]
-          │
-          │ HTTPS (443) / TLS
-          ▼
-   [Amazon Route 53] ── (DNS: app.alpfrtech.com -> ALB DNS Name | CAA: amazon.com)
-          │
-          ▼
- ┌─────────────────────────────────────────────────────────────────────────────────────────────────┐
- │ AWS Application Load Balancer (Internet-Facing ALB - AWS Managed Control Plane)                 │
- │                                                                                                 │
- │   • TLS Termination: ACM Public Certificate (*.alpfrtech.com / app.alpfrtech.com)               │
- │   • Automated HTTP-to-HTTPS SSL Redirection (Port 80 -> 443)                                    │
- │   • Target Type: IP (Direct Routing from VPC Subnets to Microservice Pod IPs)                   │
- │   • Dedicated HTTP Health Probe: /healthz on container traffic-port                             │
- │   • Zero Worker Node Ingress Overhead (No Ingress-NGINX proxy pods needed on nodes)             │
- └───────────────────────────────────────────────────┬─────────────────────────────────────────────┘
-                                                     │
-                                                     │ Direct Pod IP Routing (Port 8080)
-                                                     ▼
- ┌─────────────────────────────────────────────────────────────────────────────────────────────────┐
- │ Amazon EKS Cluster (EKS Auto Mode: Node Pools: "general-purpose")                               │
- │                                                                                                 │
- │   Namespace: kube-system                                                                        │
- │   ┌─────────────────────────────────────────────────────────────────────────────────────────┐   │
- │   │ AWS Load Balancer Controller (Operator managing ALB Ingress via IRSA)                   │   │
- │   └─────────────────────────────────────────────────────────────────────────────────────────┘   │
- │                                                                                                 │
- │   Namespace: default                                                                            │
- │   ┌─────────────────────────────────────────────────────────────────────────────────────────┐   │
- │   │ Kubernetes Service: demo-app (ClusterIP)                                                │   │
- │   │   • TargetPort: 8080                                                                    │   │
- │   │ Kubernetes Ingress: demo-app (ingressClassName: "alb")                                  │   │
- │   └─────────────────────────────────────────────┬───────────────────────────────────────────┘   │
- │                                                 │                                               │
- │                                                 ▼                                               │
- │   ┌─────────────────────────────────────────────────────────────────────────────────────────┐   │
- │   │ Zero-Trust Kubernetes NetworkPolicy (demo-app-ingress-only)                             │   │
- │   │   • Restricts Ingress on Port 8080 strictly to VPC CIDR IP blocks                       │   │
- │   └─────────────────────────────────────────────┬───────────────────────────────────────────┘   │
- │                                                 │                                               │
- │                                                 ▼                                               │
- │   ┌─────────────────────────────────────────────────────────────────────────────────────────┐   │
- │   │ Flask Microservice Pods (HPA: 2-10 replicas | PDB: minAvailable 1)                      │   │
- │   │                                                                                         │   │
- │   │   • Multi-AZ Topology Spread (topology.kubernetes.io/zone)                              │   │
- │   │   • Non-Root Execution (UID 10001, GID 10001)                                           │   │
- │   │   • Linux Capabilities: ALL dropped                                                     │   │
- │   │   • Read-Only Root Filesystem (with /tmp emptyDir)                                      │   │
- │   │   • Seccomp Profile: RuntimeDefault                                                     │   │
- │   │   • Horizontal Pod Autoscaler: CPU 70%, Memory 80%                                      │   │
- │   │   • HTTP Endpoints: / (Interactive Dashboard), /healthz, /ready, /api/info, /metrics    │   │
- │   └─────────────────────────────────────────────────────────────────────────────────────────┘   │
- └─────────────────────────────────────────────────────────────────────────────────────────────────┘
+                                        
+   [Internet Client]                                     [DevOps / Cluster Admins]
+          │                                                          │
+          │ HTTPS (443) / HTTP (80)                                  │ TCP (6443)
+          ▼                                                          ▼
+   [Amazon Route 53]                                     [Internal Route 53 / DNS]
+   (app.alpfrtech.com)                                   (k8s.internal.alpfrtech.com)
+          │                                                          │
+          ▼                                                          ▼
+ ┌──────────────────────────────────────────┐      ┌──────────────────────────────────────────┐
+ │ TIER 2: PUBLIC APPLICATION INGRESS ALB   │      │ TIER 1: CONTROL PLANE NLB                │
+ │ (AWS Application Load Balancer - Layer 7)│      │ (AWS Network Load Balancer - Layer 4)    │
+ │                                          │      │                                          │
+ │  • Public Subnets (Multi-AZ)             │      │  • Private Subnets (Multi-AZ)            │
+ │  • ACM TLS Termination (*.alpfrtech.com) │      │  • TCP Pass-Through Load Balancing       │
+ │  • HTTP-to-HTTPS Redirect (Port 80->443) │      │  • Port 6443 -> kube-apiserver           │
+ │  • Target Type: "instance" (EC2 Workers) │      │  • Port 9345 -> RKE2 Supervisor API      │
+ │  • Health Check: /healthz on Port 10254  │      │  • Health Check: TCP handshake           │
+ │  • Ingress SG: 80/443 from 0.0.0.0/0     │      │  • Ingress SG: 6443/9345 from Admin CIDR │
+ └────────────────────┬─────────────────────┘      └────────────────────┬─────────────────────┘
+                      │                                                 │
+                      │ HTTP (80/443)                                   │ TCP (6443/9345)
+                      │ Target: EC2 Worker Instances                    │ Target: Master Server Instances
+                      ▼                                                 ▼
+ ┌──────────────────────────────────────────┐      ┌──────────────────────────────────────────┐
+ │ RKE2 WORKER NODES (EC2 Auto Scaling Group│      │ RKE2 CONTROL PLANE NODES (EC2)           │
+ │                                          │      │                                          │
+ │  • Worker SG: Ingress strictly from ALB  │      │  • 3x Master Instances (Multi-AZ)        │
+ │  • rke2-ingress-nginx (hostNetwork: 80)  │      │  • etcd consensus cluster (2379-2380)    │
+ │  • Real Client IP: X-Forwarded-For       │      │  • kube-apiserver (:6443)                │
+ │  • Health Probe: :10254/healthz          │      │  • Tainted: NoSchedule (No workloads)    │
+ └────────────────────┬─────────────────────┘      └──────────────────────────────────────────┘
+                      │
+                      │ Dynamic Lua Upstream Routing (Microsecond Endpoint Sync)
+                      ▼
+ ┌────────────────────────────────────────────────────────────────────────────────────────────┐
+ │ CANAL / CALICO VXLAN OVERLAY NETWORK (10.42.0.0/16)                                        │
+ │                                                                                            │
+ │   Microservice Workload Pods (demo-app)                                                    │
+ │   ┌──────────────────────┐    ┌──────────────────────┐    ┌──────────────────────┐         │
+ │   │ Pod 1 (10.42.1.25)   │    │ Pod 2 (10.42.2.14)   │    │ Pod 3 (10.42.3.88)   │         │
+ │   │ Port: 8080 (Non-root)│    │ Port: 8080 (Non-root)│    │ Port: 8080 (Non-root)│         │
+ │   └──────────────────────┘    └──────────────────────┘    └──────────────────────┘         │
+ │                                                                                            │
+ │   • Zero Pod Churn on AWS ALB: Pod scaling/restarts update ingress-nginx Lua in memory     │
+ │   • Zero AWS API Calls: No TargetGroup DeregisterTargets calls during pod rollout          │
+ │   • Complete Overlay Isolation: Pod IPs never exposed to external AWS VPC routing          │
+ └────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Mermaid Flow Diagram
+#### RKE2 Two-Tier Ingress Flow (Mermaid Diagram)
+
+```mermaid
+graph TD
+    Client([Internet Client]) -->|HTTPS :443 / HTTP :80| R53[Amazon Route 53 DNS<br/>A Alias: app.alpfrtech.com]
+    Admin([DevOps / Admin]) -->|TCP :6443| NLB_DNS[Internal DNS<br/>k8s.internal.alpfrtech.com]
+
+    subgraph Tier1_NLB ["Tier 1: Control Plane NLB (Layer 4 - Private)"]
+        NLB_DNS --> NLB[AWS Network Load Balancer]
+        NLB -->|TCP :6443 K8s API| CP1[RKE2 Server 1 - Master]
+        NLB -->|TCP :6443 K8s API| CP2[RKE2 Server 2 - Master]
+        NLB -->|TCP :6443 K8s API| CP3[RKE2 Server 3 - Master]
+        NLB -->|TCP :9345 Supervisor| CP1
+        NLB -->|TCP :9345 Supervisor| CP2
+        NLB -->|TCP :9345 Supervisor| CP3
+    end
+
+    subgraph Tier2_ALB ["Tier 2: Application Ingress ALB (Layer 7 - Public)"]
+        R53 --> ALB[AWS Application Load Balancer]
+        ACM[ACM Certificate: *.alpfrtech.com] -.->|Terminates TLS| ALB
+        Redirect[Port 80 -> 443] -.->|SSL Redirect| ALB
+        ALB_SG[ALB Security Group<br/>Inbound: 80, 443 from 0.0.0.0/0] --- ALB
+    end
+
+    subgraph Worker_Tier ["RKE2 Worker Node Fleet (EC2 Auto Scaling Group)"]
+        ALB -->|HTTP :80 / :443<br/>target_type = 'instance'| W1[Worker Node 1<br/>rke2-ingress-nginx on hostNetwork]
+        ALB -->|HTTP :80 / :443<br/>target_type = 'instance'| W2[Worker Node 2<br/>rke2-ingress-nginx on hostNetwork]
+        ALB -->|HTTP :80 / :443<br/>target_type = 'instance'| W3[Worker Node 3<br/>rke2-ingress-nginx on hostNetwork]
+        ALB -.->|Health Check :10254 /healthz| W1
+        ALB -.->|Health Check :10254 /healthz| W2
+        ALB -.->|Health Check :10254 /healthz| W3
+        Worker_SG[Worker Node Security Group<br/>Inbound 80, 443 strictly from ALB SG] --- W1
+    end
+
+    subgraph Overlay_Tier ["Canal / Calico Overlay Network (10.42.0.0/16)"]
+        W1 -->|Lua Dynamic Upstream| P1[demo-app Pod 1<br/>10.42.1.25:8080]
+        W1 -->|Lua Dynamic Upstream| P2[demo-app Pod 2<br/>10.42.2.14:8080]
+        W2 -->|Lua Dynamic Upstream| P1
+        W2 -->|Lua Dynamic Upstream| P2
+        W3 -->|Lua Dynamic Upstream| P3[demo-app Pod 3<br/>10.42.3.88:8080]
+    end
+
+    subgraph Churn_Decoupling ["Decoupled Pod Lifecycle (Zero AWS Churn)"]
+        Pod_Kill([Pod Deleted / Autoscaled]) -.->|EndpointSlice Watch| LuaUp[rke2-ingress-nginx Lua Table Update]
+        LuaUp -.->|Zero AWS API Calls / Zero Delay| W1
+        LuaUp -.->|ALB Targets Remain 100% Static| ALB
+    end
+```
+
+---
+
+### Pattern 2: Amazon EKS Auto Mode Architecture Diagram (Cloud-Native Direct Pod IP)
+
+```
+                                       AWS CLOUD INFRASTRUCTURE
+ ───────────────────────────────────────────────────────────────────────────────────────────────────
+                                          
+    [Internet Client]
+           │
+           │ HTTPS (443) / TLS
+           ▼
+    [Amazon Route 53] ── (DNS: app.alpfrtech.com -> ALB DNS Name | CAA: amazon.com)
+           │
+           ▼
+  ┌─────────────────────────────────────────────────────────────────────────────────────────────────┐
+  │ AWS Application Load Balancer (Internet-Facing ALB - AWS Managed Control Plane)                 │
+  │                                                                                                 │
+  │   • TLS Termination: ACM Public Certificate (*.alpfrtech.com / app.alpfrtech.com)               │
+  │   • Automated HTTP-to-HTTPS SSL Redirection (Port 80 -> 443)                                    │
+  │   • Target Type: IP (Direct Routing from VPC Subnets to Microservice Pod IPs)                   │
+  │   • Dedicated HTTP Health Probe: /healthz on container traffic-port                             │
+  │   • Zero Worker Node Ingress Overhead (No Ingress-NGINX proxy pods needed on nodes)             │
+  └───────────────────────────────────────────────────┬─────────────────────────────────────────────┘
+                                                      │
+                                                      │ Direct Pod IP Routing (Port 8080)
+                                                      ▼
+  ┌─────────────────────────────────────────────────────────────────────────────────────────────────┐
+  │ Amazon EKS Cluster (EKS Auto Mode: Node Pools: "general-purpose")                               │
+  │                                                                                                 │
+  │   Namespace: kube-system                                                                        │
+  │   ┌─────────────────────────────────────────────────────────────────────────────────────────┐   │
+  │   │ AWS Load Balancer Controller (Operator managing ALB Ingress via IRSA)                   │   │
+  │   └─────────────────────────────────────────────────────────────────────────────────────────┘   │
+  │                                                                                                 │
+  │   Namespace: default                                                                            │
+  │   ┌─────────────────────────────────────────────────────────────────────────────────────────┐   │
+  │   │ Kubernetes Service: demo-app (ClusterIP)                                                │   │
+  │   │   • TargetPort: 8080                                                                    │   │
+  │   │ Kubernetes Ingress: demo-app (ingressClassName: "alb")                                  │   │
+  │   └─────────────────────────────────────────────┬───────────────────────────────────────────┘   │
+  │                                                 │                                               │
+  │                                                 ▼                                               │
+  │   ┌─────────────────────────────────────────────────────────────────────────────────────────┐   │
+  │   │ Zero-Trust Kubernetes NetworkPolicy (demo-app-ingress-only)                             │   │
+  │   │   • Restricts Ingress on Port 8080 strictly to VPC CIDR IP blocks                       │   │
+  │   └─────────────────────────────────────────────┬───────────────────────────────────────────┘   │
+  │                                                 │                                               │
+  │                                                 ▼                                               │
+  │   ┌─────────────────────────────────────────────────────────────────────────────────────────┐   │
+  │   │ Flask Microservice Pods (HPA: 2-10 replicas | PDB: minAvailable 1)                      │   │
+  │   │                                                                                         │   │
+  │   │   • Multi-AZ Topology Spread (topology.kubernetes.io/zone)                              │   │
+  │   │   • Non-Root Execution (UID 10001, GID 10001)                                           │   │
+  │   │   • Linux Capabilities: ALL dropped                                                     │   │
+  │   │   • Read-Only Root Filesystem (with /tmp emptyDir)                                      │   │
+  │   │   • Seccomp Profile: RuntimeDefault                                                     │   │
+  │   │   • Horizontal Pod Autoscaler: CPU 70%, Memory 80%                                      │   │
+  │   │   • HTTP Endpoints: / (Interactive Dashboard), /healthz, /ready, /api/info, /metrics    │   │
+  │   └─────────────────────────────────────────────────────────────────────────────────────────┘   │
+  └─────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### EKS Auto Mode Flow (Mermaid Diagram)
 
 ```mermaid
 graph TD
@@ -258,6 +386,10 @@ Based on Jev's deterministic risk scoring, the following optimizations are ident
 ## RKE2 Architecture & Network Team Recommendation (ALB to Worker Nodes)
 
 In production enterprise deployments utilizing **RKE2 (Rancher Kubernetes Engine 2)** on AWS EC2, the network team recommendation is to route the **AWS Application Load Balancer (ALB)** directly to the **Worker Nodes** (`target_type = "instance"`) on port 80/443, rather than targeting the Control Plane or attempting direct Pod IP routing across an overlay network.
+
+<p align="center">
+  <img src="docs/images/rke2_architecture.png" alt="RKE2 Two-Tier Load Balancing Architecture Diagram" width="100%" />
+</p>
 
 ### 1. Two-Tier Load Balancing Topology in RKE2
 

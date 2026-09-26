@@ -13,6 +13,8 @@ This module contains the complete, production-ready implementation of an **Amazo
 
 ## Architecture & Live Dashboard
 
+> **Tip**: If you are deploying on self-managed **RKE2 (Rancher Kubernetes Engine 2)** on EC2 rather than EKS, see the **[RKE2 ALB to Worker Nodes Module](../rke2-alb-infra/)** and review the **[RKE2 Two-Tier Load Balancing Architecture Diagram](../docs/images/rke2_architecture.png)** implementing the Enterprise Network Team recommendation.
+
 <p align="center">
   <img src="docs/images/architecture.png" alt="AWS EKS ALB Ingress Architecture Diagram" width="100%" />
 </p>
@@ -23,23 +25,51 @@ This module contains the complete, production-ready implementation of an **Amazo
 </p>
 
 ```
-[Internet Client]
-       │
-       │  HTTPS (443) / TLS
-       ▼
-[Amazon Route 53 Public Hosted Zone] (CNAME: app.alpfrtech.com -> ALB DNS)
-       │
-       ▼
-[AWS Application Load Balancer (ALB)] (AWS Control Plane Managed, TLS Terminated with ACM Certificate)
-       │  • Native HTTP-to-HTTPS SSL Redirect (Port 80 -> 443)
-       │  • Direct Health Probes (/healthz on traffic-port)
-       │  • Target Type: IP (Direct Pod Routing / Zero Worker Node Proxy Overhead)
-       │
-       ▼ (Direct routing to Pod IP on Port 8080)
-[Zero-Trust NetworkPolicy: demo-app-ingress-only] (Permits port 8080 from VPC CIDR)
-       │
-       ▼
-[Hardened Flask Pods running via Gunicorn] (Non-root UID 10001, HPA 2-10 replicas)
+                                      AWS CLOUD INFRASTRUCTURE
+ ───────────────────────────────────────────────────────────────────────────────────────────────────
+                                         
+   [Internet Client]
+          │
+          │ HTTPS (443) / TLS
+          ▼
+   [Amazon Route 53 Public Hosted Zone] (CNAME: app.alpfrtech.com -> ALB DNS)
+          │
+          ▼
+   [AWS Application Load Balancer (ALB)] (AWS Control Plane Managed, TLS Terminated with ACM Certificate)
+          │  • Native HTTP-to-HTTPS SSL Redirect (Port 80 -> 443)
+          │  • Direct Health Probes (/healthz on traffic-port)
+          │  • Target Type: IP (Direct Pod Routing / Zero Worker Node Proxy Overhead)
+          │
+          ▼ (Direct routing to Pod IP on Port 8080)
+   [Zero-Trust NetworkPolicy: demo-app-ingress-only] (Permits port 8080 from VPC CIDR)
+          │
+          ▼
+   [Hardened Flask Pods running via Gunicorn] (Non-root UID 10001, HPA 2-10 replicas)
+```
+
+### Mermaid Flow Diagram
+
+```mermaid
+graph TD
+    Client([Internet Client]) -->|HTTPS :443| R53[Route 53 DNS Record]
+    R53 -->|CNAME| ALB[AWS Application Load Balancer]
+    subgraph AWS Application Load Balancer
+        ACM[ACM Certificate: *.alpfrtech.com] -.->|Terminates TLS| ALB
+        Redirect[Port 80 -> 443] -.->|SSL Redirect| ALB
+        Probe[Health Probe /healthz] -.->|Direct HTTP Probe| Pod1
+    end
+    ALB -->|Direct IP Routing :8080| NP[NetworkPolicy: demo-app-ingress-only]
+    subgraph Zero-Trust Isolation
+        NP -->|Allowed VPC CIDR| Pod1[demo-app Pod 1 - Zone A]
+        NP -->|Allowed VPC CIDR| Pod2[demo-app Pod 2 - Zone B]
+    end
+    subgraph Workload Pods
+        HPA[HPA 2-10 Replicas] -.->|Autoscales| Pod1
+        HPA -.->|Autoscales| Pod2
+    end
+    subgraph Control Plane Operator
+        ALBController[AWS Load Balancer Controller in kube-system] -.->|Reconciles Ingress via IRSA| ALB
+    end
 ```
 
 ---

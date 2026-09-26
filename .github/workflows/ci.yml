@@ -23,6 +23,7 @@ jobs:
         run: |
           terraform fmt -check -diff eks-nlb-acm-route53-demo/bootstrap
           terraform fmt -check -diff eks-nlb-acm-route53-demo/infra
+          terraform fmt -check -diff rke2-alb-infra
 
       - name: Validate Bootstrap Module
         run: |
@@ -33,6 +34,12 @@ jobs:
       - name: Validate Infrastructure Module
         run: |
           cd eks-nlb-acm-route53-demo/infra
+          terraform init -backend=false
+          terraform validate
+
+      - name: Validate RKE2 ALB Infrastructure Module
+        run: |
+          cd rke2-alb-infra
           terraform init -backend=false
           terraform validate
 

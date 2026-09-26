@@ -336,6 +336,18 @@ A dedicated setup and verification utility is provided in [`scripts/rke2-alb-set
 ./scripts/rke2-alb-setup.sh --vpc-id vpc-04069dd8bf42ea2db -y
 ```
 
+#### D. Dedicated RKE2 Terraform Module ([`rke2-alb-infra/`](rke2-alb-infra/))
+A standalone, production-ready Terraform module implementing the **Network Team Recommendation** (ALB directly targeting RKE2 Worker Nodes with `target_type = "instance"`) is provided in [`rke2-alb-infra/`](rke2-alb-infra/):
+```bash
+cd rke2-alb-infra
+cp terraform.tfvars.example terraform.tfvars
+terraform init && terraform plan && terraform apply
+```
+Or deploy via the automated CLI script:
+```bash
+./scripts/deploy.sh --rke2 --vpc-id vpc-04069dd8bf42ea2db -y
+```
+
 ---
 
 ## Repository Layout
@@ -348,10 +360,17 @@ dns-lb-ingress-service-pods/
 │   └── workflows/
 │       └── ci.yml                             # Automated GitHub Actions CI pipeline
 ├── scripts/                                   # Automated orchestration and operational scripts
-│   ├── deploy.sh                              # Complete end-to-end automated deployment suite
+│   ├── deploy.sh                              # Complete end-to-end automated deployment suite (EKS & RKE2)
 │   ├── verify.sh                              # Post-deployment health checks and smoke testing (EKS & RKE2)
 │   ├── rke2-alb-setup.sh                      # Helper suite for ALB -> RKE2 Worker Node ingress
 │   └── destroy.sh                             # Safe infrastructure teardown and resource cleanup
+├── rke2-alb-infra/                            # Dedicated RKE2 ALB to Worker Nodes Terraform Module
+│   ├── main.tf                                # ALB, Target Group (instance), ACM, Route 53 A Alias, SG
+│   ├── variables.tf                           # VPC, subnets, worker IDs, ports, domain
+│   ├── outputs.tf                             # App URL, ALB DNS, Target Group ARN
+│   ├── versions.tf                            # Terraform >= 1.10, AWS provider ~> 6.0
+│   ├── terraform.tfvars.example               # Example variables template for RKE2
+│   └── README.md                              # Module architecture and runbook
 ├── eks-nlb-acm-route53-demo/
 │   ├── README.md                              # Sub-module operational guide
 │   ├── bootstrap/                             # Terraform S3 backend storage module
@@ -403,9 +422,10 @@ cd dns-lb-ingress-service-pods
 
 | Script | Purpose | Example Command |
 | :--- | :--- | :--- |
-| **`scripts/deploy.sh`** | Full end-to-end automation: auto-discovers healthy VPCs in region, bootstraps S3 state bucket, builds & pushes container to ECR, configures backend/tfvars, applies Terraform (ALB, EKS Auto Mode, ACM, DNS), and verifies | `./scripts/deploy.sh --vpc-id vpc-04069dd8bf42ea2db -y` |
-| **`scripts/verify.sh`** | 5-stage verification suite: cluster connectivity, AWS Load Balancer Controller, ALB Ingress annotations, NetworkPolicy, and probes live HTTPS endpoints (`/`, `/healthz`, `/ready`, `/api/info`) | `./scripts/verify.sh -d alpfrtech.com` |
-| **`scripts/destroy.sh`** | Safely tears down EKS cluster, ALB, Route 53 CNAME, and ACM certificate (preserves existing VPC intact), with options to delete ECR image repo and S3 state bucket | `./scripts/destroy.sh -y --delete-ecr` |
+| **`scripts/deploy.sh`** | Full end-to-end automation: supports EKS Auto Mode or RKE2 ALB to Worker Nodes (`--rke2`), auto-discovers VPCs, bootstraps state, and verifies | `./scripts/deploy.sh --rke2 --vpc-id vpc-04069dd8bf42ea2db -y` |
+| **`scripts/verify.sh`** | 5-stage verification suite: auto-detects EKS vs. RKE2, checks Ingress controllers, target-types, NetworkPolicy, and probes HTTPS endpoints | `./scripts/verify.sh -d alpfrtech.com` |
+| **`scripts/rke2-alb-setup.sh`** | Setup helper for RKE2: inspects nodes, patches `rke2-ingress-nginx` for client IP preservation, and generates ALB target group HCL | `./scripts/rke2-alb-setup.sh --vpc-id vpc-04069dd8bf42ea2db -y` |
+| **`scripts/destroy.sh`** | Safely tears down EKS/ALB infrastructure, Route 53 records, and ACM certificates (preserves existing VPC intact) | `./scripts/destroy.sh -y --delete-ecr` |
 
 ---
 

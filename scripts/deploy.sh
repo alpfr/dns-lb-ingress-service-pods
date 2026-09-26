@@ -62,6 +62,7 @@ VPC_ID=""
 VPC_ID_PROVIDED=false
 FORCE_CREATE_VPC=false
 IMAGE_TAG="v2"
+PLATFORM="eks"
 SKIP_BOOTSTRAP=false
 SKIP_BUILD=false
 AUTO_APPROVE=false
@@ -71,10 +72,11 @@ usage() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Automates the provisioning of EKS Auto Mode, S3 state backend, ECR repository,
-container build & push, AWS ALB Ingress with ACM TLS termination, and Route 53 DNS.
+Automates the provisioning of EKS Auto Mode or RKE2 ALB to Worker Nodes, S3 state backend,
+ECR repository, container build & push, AWS ALB Ingress with ACM TLS, and Route 53 DNS.
 
 Options:
+  --rke2                    Deploy ALB for RKE2 Worker Nodes (target-type: instance per Network Team)
   -d, --domain DOMAIN       Route 53 public hosted zone name (default: alpfrtech.com)
   -s, --subdomain SUB       Subdomain prefix for application (default: app)
   -r, --region REGION       AWS region (default: us-east-1 or \$AWS_REGION)
@@ -91,7 +93,7 @@ Options:
 
 Examples:
   $(basename "$0")
-  $(basename "$0") --vpc-id vpc-04069dd8bf42ea2db
+  $(basename "$0") --rke2 --vpc-id vpc-04069dd8bf42ea2db
   $(basename "$0") --create-vpc
   $(basename "$0") --domain alpfrtech.com -y
 EOF
@@ -100,6 +102,13 @@ EOF
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --rke2)
+            PLATFORM="rke2"
+            INFRA_DIR="${ROOT_DIR}/rke2-alb-infra"
+            SKIP_BUILD=true
+            SKIP_BOOTSTRAP=true
+            shift
+            ;;
         -d|--domain)
             DOMAIN_NAME="$2"
             DOMAIN_PROVIDED=true
@@ -400,8 +409,29 @@ print_step "4/5" "Deploying Infrastructure & Kubernetes Workload"
 cd "$INFRA_DIR"
 
 # Generate or update terraform.tfvars
-echo "Updating ${INFRA_DIR}/terraform.tfvars..."
-cat > "${INFRA_DIR}/terraform.tfvars" <<EOF
+if [[ "$PLATFORM" == "rke2" ]]; then
+    echo "Updating ${INFRA_DIR}/terraform.tfvars for RKE2 ALB to Worker Nodes..."
+    cat > "${INFRA_DIR}/terraform.tfvars" <<EOF
+aws_region          = "${AWS_REGION}"
+name                = "rke2-ingress"
+vpc_id              = "${VPC_ID}"
+domain_name         = "${DOMAIN_NAME}"
+app_subdomain       = "${APP_SUBDOMAIN}"
+ingress_port        = 80
+ingress_protocol    = "HTTP"
+health_check_path   = "/healthz"
+health_check_port   = "10254"
+create_route53_zone = ${CREATE_ROUTE53_ZONE}
+tags = {
+  Environment = "Production"
+  ManagedBy   = "Terraform"
+  Cluster     = "RKE2"
+  Project     = "RKE2-ALB-Worker-Nodes"
+}
+EOF
+else
+    echo "Updating ${INFRA_DIR}/terraform.tfvars..."
+    cat > "${INFRA_DIR}/terraform.tfvars" <<EOF
 aws_region                  = "${AWS_REGION}"
 cluster_name                = "${CLUSTER_NAME}"
 vpc_id                      = "${VPC_ID}"
@@ -416,6 +446,7 @@ tags = {
   Project     = "EKS-Demo"
 }
 EOF
+fi
 print_success "Configured terraform.tfvars"
 
 echo "Initializing Terraform infrastructure module..."
@@ -430,13 +461,18 @@ print_success "Terraform configuration is valid"
 echo "Planning infrastructure changes..."
 terraform plan -out=tfplan
 
-echo -e "\n${BOLD}${YELLOW}Applying infrastructure plan (EKS creation takes ~12-15 minutes)...${NC}"
-if ! terraform apply $APPROVAL_FLAG tfplan; then
-    print_warning "Terraform apply encountered a transient delay (e.g. IAM access policy propagation)."
-    echo "Updating kubeconfig and attempting reconciliation apply in 10s..."
-    aws eks update-kubeconfig --region "$AWS_REGION" --name "$CLUSTER_NAME" 2>/dev/null || true
-    sleep 10
-    terraform apply $APPROVAL_FLAG
+if [[ "$PLATFORM" == "rke2" ]]; then
+    echo -e "\n${BOLD}${YELLOW}Applying RKE2 ALB infrastructure plan...${NC}"
+    terraform apply $APPROVAL_FLAG tfplan
+else
+    echo -e "\n${BOLD}${YELLOW}Applying infrastructure plan (EKS creation takes ~12-15 minutes)...${NC}"
+    if ! terraform apply $APPROVAL_FLAG tfplan; then
+        print_warning "Terraform apply encountered a transient delay (e.g. IAM access policy propagation)."
+        echo "Updating kubeconfig and attempting reconciliation apply in 10s..."
+        aws eks update-kubeconfig --region "$AWS_REGION" --name "$CLUSTER_NAME" 2>/dev/null || true
+        sleep 10
+        terraform apply $APPROVAL_FLAG
+    fi
 fi
 print_success "Infrastructure provisioned successfully"
 
@@ -445,9 +481,13 @@ print_success "Infrastructure provisioned successfully"
 # ------------------------------------------------------------------------------
 print_step "5/5" "Verifying Deployment & Testing Live Endpoints"
 
-echo "Configuring kubectl context for cluster: ${CLUSTER_NAME}..."
-aws eks update-kubeconfig --region "$AWS_REGION" --name "$CLUSTER_NAME"
-print_success "kubectl context updated"
+if [[ "$PLATFORM" == "eks" ]]; then
+    echo "Configuring kubectl context for cluster: ${CLUSTER_NAME}..."
+    aws eks update-kubeconfig --region "$AWS_REGION" --name "$CLUSTER_NAME"
+    print_success "kubectl context updated"
+else
+    echo "Target Platform: RKE2 on AWS EC2 (ALB -> Worker Nodes)"
+fi
 
 echo "Running verification checks..."
 if [[ -f "${SCRIPT_DIR}/verify.sh" ]]; then

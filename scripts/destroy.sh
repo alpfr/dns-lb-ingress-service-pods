@@ -18,6 +18,7 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 DEMO_DIR="${ROOT_DIR}/eks-nlb-acm-route53-demo"
 BOOTSTRAP_DIR="${DEMO_DIR}/bootstrap"
 INFRA_DIR="${DEMO_DIR}/infra"
+PLATFORM="eks"
 
 AUTO_APPROVE=false
 DELETE_BOOTSTRAP=false
@@ -29,10 +30,11 @@ usage() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Safely tears down the EKS cluster, ALB, Route 53 records, and optionally cleans
-up the ECR image repository and remote S3 state bucket.
+Safely tears down the EKS cluster or RKE2 ALB infrastructure, Target Groups,
+Route 53 records, ACM certificates, and optionally cleans up ECR and S3 remote state.
 
 Options:
+  --rke2                    Tear down RKE2 ALB infrastructure (preserves EC2 worker nodes)
   -y, --auto-approve        Skip interactive confirmation prompts
   --delete-ecr              Delete the demo-app ECR repository and images
   --delete-bootstrap        Delete the Terraform remote state S3 bucket
@@ -41,6 +43,7 @@ Options:
 
 Examples:
   $(basename "$0")
+  $(basename "$0") --rke2 -y
   $(basename "$0") -y --delete-ecr
 EOF
     exit 0
@@ -48,6 +51,11 @@ EOF
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --rke2)
+            PLATFORM="rke2"
+            INFRA_DIR="${ROOT_DIR}/rke2-alb-infra"
+            shift
+            ;;
         -y|--auto-approve)
             AUTO_APPROVE=true
             shift
@@ -75,20 +83,32 @@ while [[ $# -gt 0 ]]; do
 done
 
 echo -e "${RED}========================================================================${NC}"
-echo -e "${BOLD}${RED}⚠ WARNING: Infrastructure Teardown${NC}"
+echo -e "${BOLD}${RED}⚠ WARNING: Infrastructure Teardown (${PLATFORM^^})${NC}"
 echo -e "${RED}========================================================================${NC}"
-echo "This action will permanently destroy:"
-echo "  • EKS Auto Mode Cluster and Compute Instances"
-echo "  • AWS Application Load Balancer (ALB)"
-echo "  • Route 53 DNS Records"
-echo "  • ACM TLS Certificate"
-echo "  • AWS Load Balancer Controller & Microservice Pods"
-if [[ -f "${INFRA_DIR}/terraform.tfvars" ]] && grep -qE '^\s*vpc_id\s*=\s*"vpc-' "${INFRA_DIR}/terraform.tfvars"; then
-    VPC_USED=$(grep -E '^\s*vpc_id\s*=' "${INFRA_DIR}/terraform.tfvars" | head -n 1 | awk -F'=' '{print $2}' | tr -d ' "')
-    echo -e "${GREEN}  • Existing VPC (${VPC_USED}) is PRESERVED and will NOT be modified or destroyed.${NC}"
+
+if [[ "$PLATFORM" == "rke2" ]]; then
+    echo "This action will permanently destroy:"
+    echo "  • AWS Application Load Balancer (ALB) for RKE2 Worker Nodes"
+    echo "  • ALB Target Group (rke2-workers-tg)"
+    echo "  • Route 53 A Alias Record and ACM TLS Certificate"
+    echo "  • ALB Security Group and Ingress Rules"
+    echo -e "${GREEN}  • RKE2 Control Plane and Worker EC2 instances are PRESERVED and untouched.${NC}"
+    echo -e "${GREEN}  • Existing VPC and Subnets are PRESERVED and untouched.${NC}"
 else
-    echo "  • Dedicated VPC and Subnets (if created by Terraform)"
+    echo "This action will permanently destroy:"
+    echo "  • EKS Auto Mode Cluster and Compute Instances"
+    echo "  • AWS Application Load Balancer (ALB)"
+    echo "  • Route 53 DNS Records"
+    echo "  • ACM TLS Certificate"
+    echo "  • AWS Load Balancer Controller & Microservice Pods"
+    if [[ -f "${INFRA_DIR}/terraform.tfvars" ]] && grep -qE '^\s*vpc_id\s*=\s*"vpc-' "${INFRA_DIR}/terraform.tfvars"; then
+        VPC_USED=$(grep -E '^\s*vpc_id\s*=' "${INFRA_DIR}/terraform.tfvars" | head -n 1 | awk -F'=' '{print $2}' | tr -d ' "')
+        echo -e "${GREEN}  • Existing VPC (${VPC_USED}) is PRESERVED and will NOT be modified or destroyed.${NC}"
+    else
+        echo "  • Dedicated VPC and Subnets (if created by Terraform)"
+    fi
 fi
+
 if [[ "$DELETE_ECR" == true ]]; then
     echo "  • Amazon ECR Repository (${ECR_REPO_NAME})"
 fi
@@ -106,7 +126,7 @@ if [[ "$AUTO_APPROVE" != true ]]; then
 fi
 
 # 1. Destroy Infrastructure
-echo -e "\n${BOLD}${BLUE}==> [1/3] Destroying Core Infrastructure (infra/)...${NC}"
+echo -e "\n${BOLD}${BLUE}==> [1/3] Destroying Core Infrastructure (${INFRA_DIR})...${NC}"
 cd "$INFRA_DIR"
 if [[ -f "terraform.tfvars" ]]; then
     terraform init -upgrade

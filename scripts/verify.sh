@@ -23,6 +23,9 @@ DOMAIN_PROVIDED=false
 APP_SUBDOMAIN="app"
 APP_SUBDOMAIN_PROVIDED=false
 
+PLATFORM="eks"
+AWS_REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
+
 usage() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
@@ -30,12 +33,15 @@ Usage: $(basename "$0") [OPTIONS]
 Performs cluster, ingress, pod, and HTTP endpoint health checks.
 
 Options:
+  --rke2                    Validate RKE2 ALB to Worker Nodes deployment
   -d, --domain DOMAIN       Route 53 public domain (default: alpfrtech.com)
   -s, --subdomain SUB       Subdomain prefix (default: app)
+  -r, --region REGION       AWS Region (default: us-east-1)
   -h, --help                Show this help message and exit
 
 Examples:
   $(basename "$0")
+  $(basename "$0") --rke2
   $(basename "$0") --domain alpfrtech.com
   $(basename "$0") -d alpfrtech.com -s app
 EOF
@@ -44,6 +50,11 @@ EOF
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --rke2)
+            PLATFORM="rke2"
+            INFRA_DIR="${ROOT_DIR}/rke2-alb-infra"
+            shift
+            ;;
         -d|--domain)
             DOMAIN_NAME="$2"
             DOMAIN_PROVIDED=true
@@ -52,6 +63,10 @@ while [[ $# -gt 0 ]]; do
         -s|--subdomain)
             APP_SUBDOMAIN="$2"
             APP_SUBDOMAIN_PROVIDED=true
+            shift 2
+            ;;
+        -r|--region)
+            AWS_REGION="$2"
             shift 2
             ;;
         -h|--help)
@@ -133,10 +148,28 @@ fi
 
 ALB_HOSTNAME=$(kubectl get ingress demo-app -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
 if [[ -n "$ALB_HOSTNAME" ]]; then
-    echo -e "${GREEN}✔ External Application Load Balancer (ALB) Hostname: ${ALB_HOSTNAME}${NC}\n"
+    echo -e "${GREEN}✔ External Application Load Balancer (ALB) Hostname: ${ALB_HOSTNAME}${NC}"
 else
-    echo -e "${YELLOW}⚠ ALB hostname not registered on Ingress. Route 53 or external LB may be managed outside the ingress controller.${NC}\n"
+    echo -e "${YELLOW}⚠ ALB hostname not registered on Ingress. Route 53 or external LB may be managed outside the ingress controller.${NC}"
 fi
+
+# Check AWS Target Group health directly if AWS CLI is configured
+if command -v aws &>/dev/null; then
+    TARGET_TG_NAME="rke2-workers-tg"
+    if [[ "$PLATFORM" == "eks" ]]; then
+        TARGET_TG_NAME=$(aws elbv2 describe-target-groups --region "$AWS_REGION" --query "TargetGroups[?contains(TargetGroupName, 'demo-app')].TargetGroupName | [0]" --output text 2>/dev/null || echo "")
+    fi
+    if [[ -n "$TARGET_TG_NAME" && "$TARGET_TG_NAME" != "None" ]]; then
+        TG_ARN=$(aws elbv2 describe-target-groups --region "$AWS_REGION" --names "$TARGET_TG_NAME" --query "TargetGroups[0].TargetGroupArn" --output text 2>/dev/null || true)
+        if [[ -n "$TG_ARN" && "$TG_ARN" != "None" ]]; then
+            HEALTH_SUMMARY=$(aws elbv2 describe-target-health --target-group-arn "$TG_ARN" --region "$AWS_REGION" --query "TargetHealthDescriptions[*].TargetHealth.State" --output text 2>/dev/null || true)
+            TOTAL_TARGETS=$(echo "$HEALTH_SUMMARY" | wc -w | tr -d ' ')
+            HEALTHY_TARGETS=$(echo "$HEALTH_SUMMARY" | grep -o "healthy" | wc -l | tr -d ' ' || echo "0")
+            echo -e "${GREEN}✔ AWS Target Group (${TARGET_TG_NAME}): ${HEALTHY_TARGETS}/${TOTAL_TARGETS} targets healthy in AWS${NC}"
+        fi
+    fi
+fi
+echo ""
 
 # 3. Workload Pods, Ingress Rules & NetworkPolicy
 echo -e "${BOLD}${BLUE}[3/5] Checking Microservice Pods, Ingress Rules & NetworkPolicy...${NC}"

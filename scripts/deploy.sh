@@ -458,6 +458,35 @@ terraform fmt -check
 terraform validate
 print_success "Terraform configuration is valid"
 
+if [[ "$PLATFORM" == "rke2" ]]; then
+    # Route 53 does not permit creating an 'A' Alias record if a conflicting 'CNAME' record exists with the same name.
+    # Check if a legacy CNAME exists (e.g. from an EKS deployment) and clean it up automatically.
+    echo "Checking Route 53 for conflicting CNAME records on ${APP_SUBDOMAIN}.${DOMAIN_NAME}..."
+    ZONE_ID=$(aws route53 list-hosted-zones-by-name --dns-name "${DOMAIN_NAME}" --query "HostedZones[0].Id" --output text 2>/dev/null | sed 's|/hostedzone/||' || true)
+    if [[ -n "$ZONE_ID" && "$ZONE_ID" != "None" ]]; then
+        CONFLICTING_CNAME=$(aws route53 list-resource-record-sets --hosted-zone-id "$ZONE_ID" \
+            --query "ResourceRecordSets[?Name=='${APP_SUBDOMAIN}.${DOMAIN_NAME}.' && Type=='CNAME'].ResourceRecords[0].Value" \
+            --output text 2>/dev/null || true)
+        if [[ -n "$CONFLICTING_CNAME" && "$CONFLICTING_CNAME" != "None" ]]; then
+            print_warning "Found conflicting Route 53 CNAME for ${APP_SUBDOMAIN}.${DOMAIN_NAME} pointing to ${CONFLICTING_CNAME}"
+            echo "Deleting legacy CNAME to allow A Alias record creation..."
+            aws route53 change-resource-record-sets --hosted-zone-id "$ZONE_ID" --change-batch "{
+                \"Comment\": \"Delete conflicting CNAME for ${APP_SUBDOMAIN}.${DOMAIN_NAME}\",
+                \"Changes\": [{
+                    \"Action\": \"DELETE\",
+                    \"ResourceRecordSet\": {
+                        \"Name\": \"${APP_SUBDOMAIN}.${DOMAIN_NAME}.\",
+                        \"Type\": \"CNAME\",
+                        \"TTL\": 60,
+                        \"ResourceRecords\": [{\"Value\": \"${CONFLICTING_CNAME}\"}]
+                    }
+                }]
+            }" >/dev/null 2>&1 || true
+            print_success "Conflicting CNAME removed from Route 53"
+        fi
+    fi
+fi
+
 echo "Planning infrastructure changes..."
 terraform plan -out=tfplan
 

@@ -248,9 +248,10 @@ resource "aws_lb_listener" "https" {
 # Route 53 A Alias Record
 # ------------------------------------------------------------------------------
 resource "aws_route53_record" "app" {
-  zone_id = local.route53_zone_id
-  name    = "${var.app_subdomain}.${var.domain_name}"
-  type    = "A"
+  zone_id         = local.route53_zone_id
+  name            = "${var.app_subdomain}.${var.domain_name}"
+  type            = "A"
+  allow_overwrite = true
 
   alias {
     name                   = aws_lb.rke2_app.dns_name
@@ -258,3 +259,4 @@ resource "aws_route53_record" "app" {
     evaluate_target_health = true
   }
 }
+

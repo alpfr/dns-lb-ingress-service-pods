@@ -225,6 +225,15 @@ if [[ "$HTTP_HEALTH_CODE" == "200" ]]; then
 else
     echo -e "${YELLOW}⚠ /healthz returned HTTP ${HTTP_HEALTH_CODE} (DNS or SSL certificate validation may still be propagating)${NC}"
     echo -e "  Response: ${HEALTH_RESPONSE}"
+    if [[ "$HTTP_HEALTH_CODE" == "503" ]]; then
+        if [[ "$CLUSTER_TYPE" == "EKS" && "$APP_SUBDOMAIN" != "app" ]]; then
+            echo -e "${CYAN}  ℹ Diagnostic Hint: Connected cluster is AWS EKS where workloads serve at https://app.${DOMAIN_NAME}${NC}"
+            echo -e "${CYAN}    To validate the active EKS cluster, run: ./scripts/validate.sh -d ${DOMAIN_NAME} -s app${NC}"
+        elif [[ "$PLATFORM" == "rke2" ]]; then
+            echo -e "${CYAN}  ℹ Diagnostic Hint: HTTP 503 means zero healthy EC2 worker instances are registered in the RKE2 ALB Target Group.${NC}"
+            echo -e "${CYAN}    Add worker node instance IDs to 'worker_instance_ids' in rke2-alb-infra/terraform.tfvars and re-apply.${NC}"
+        fi
+    fi
 fi
 
 echo -e "\nTesting ${APP_URL}/ready (Readiness Probe)..."

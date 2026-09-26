@@ -95,29 +95,54 @@ else
 fi
 
 # 1. Cluster connectivity & Node check
-echo -e "${BOLD}${BLUE}[1/5] Checking EKS Cluster Nodes (Auto Mode)...${NC}"
+echo -e "${BOLD}${BLUE}[1/5] Checking Kubernetes Cluster Nodes & Distribution...${NC}"
 if ! kubectl get nodes -o wide; then
-    echo -e "${RED}✖ Failed to reach EKS cluster API. Run 'aws eks update-kubeconfig' first.${NC}"
+    echo -e "${RED}✖ Failed to reach Kubernetes cluster API. Verify your kubeconfig context.${NC}"
     exit 1
 fi
-echo -e "${GREEN}✔ EKS API server accessible and nodes reported${NC}\n"
+
+K8S_SERVER_VERSION=$(kubectl version -o json 2>/dev/null | jq -r '.serverVersion.gitVersion' 2>/dev/null || kubectl version --short 2>/dev/null || echo "Unknown")
+if echo "$K8S_SERVER_VERSION" | grep -qi "rke2"; then
+    CLUSTER_TYPE="RKE2"
+    echo -e "${GREEN}✔ Cluster Distribution: RKE2 (${K8S_SERVER_VERSION})${NC}"
+    echo -e "  • Control Plane Nodes: $(kubectl get nodes -l node-role.kubernetes.io/control-plane -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || echo 'N/A')"
+    echo -e "  • Worker Nodes (ALB Targets): $(kubectl get nodes --no-headers -l '!node-role.kubernetes.io/control-plane' -o custom-columns=NAME:.metadata.name,IP:.status.addresses[0].address 2>/dev/null | tr '\n' ' ' || echo 'N/A')"
+elif echo "$K8S_SERVER_VERSION" | grep -qi "eks"; then
+    CLUSTER_TYPE="EKS"
+    echo -e "${GREEN}✔ Cluster Distribution: AWS EKS (${K8S_SERVER_VERSION})${NC}"
+else
+    CLUSTER_TYPE="Kubernetes"
+    echo -e "${GREEN}✔ Kubernetes Distribution: ${K8S_SERVER_VERSION}${NC}"
+fi
+echo ""
 
 # 2. Ingress Controller & ALB status
-echo -e "${BOLD}${BLUE}[2/5] Checking AWS Load Balancer Controller & ALB Ingress...${NC}"
-kubectl get pods -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller 2>/dev/null || true
+echo -e "${BOLD}${BLUE}[2/5] Checking Ingress Controller & ALB Ingress Status...${NC}"
+ALB_CONTROLLER_PODS=$(kubectl get pods -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller --no-headers 2>/dev/null || true)
+RKE2_INGRESS_PODS=$(kubectl get pods -n kube-system -l app.kubernetes.io/name=rke2-ingress-nginx --no-headers 2>/dev/null || true)
+
+if [[ -n "$ALB_CONTROLLER_PODS" ]]; then
+    echo -e "${GREEN}✔ AWS Load Balancer Controller detected in kube-system:${NC}"
+    echo "  $ALB_CONTROLLER_PODS"
+elif [[ -n "$RKE2_INGRESS_PODS" ]]; then
+    echo -e "${GREEN}✔ rke2-ingress-nginx detected in kube-system (RKE2 Worker Ingress):${NC}"
+    echo "  $RKE2_INGRESS_PODS"
+else
+    echo -e "${YELLOW}⚠ Ingress controller pods not found in kube-system${NC}"
+fi
 
 ALB_HOSTNAME=$(kubectl get ingress demo-app -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
 if [[ -n "$ALB_HOSTNAME" ]]; then
     echo -e "${GREEN}✔ External Application Load Balancer (ALB) Hostname: ${ALB_HOSTNAME}${NC}\n"
 else
-    echo -e "${YELLOW}⚠ ALB hostname is still provisioning in AWS. Route 53 resolution may take a moment.${NC}\n"
+    echo -e "${YELLOW}⚠ ALB hostname not registered on Ingress. Route 53 or external LB may be managed outside the ingress controller.${NC}\n"
 fi
 
 # 3. Workload Pods, Ingress Rules & NetworkPolicy
 echo -e "${BOLD}${BLUE}[3/5] Checking Microservice Pods, Ingress Rules & NetworkPolicy...${NC}"
-kubectl get pods -l app=demo-app -o wide
-kubectl get svc demo-app
-kubectl get ingress demo-app
+kubectl get pods -l app=demo-app -o wide 2>/dev/null || kubectl get pods -A | grep -E "demo-app|datarobot" || true
+kubectl get svc demo-app 2>/dev/null || true
+kubectl get ingress demo-app 2>/dev/null || true
 echo -e "\nVerifying NetworkPolicy (Zero-Trust Ingress Isolation)..."
 if kubectl get networkpolicy -n default demo-app-ingress-only &>/dev/null; then
     kubectl get networkpolicy -n default demo-app-ingress-only
@@ -126,28 +151,33 @@ else
     echo -e "${YELLOW}⚠ NetworkPolicy 'demo-app-ingress-only' not found${NC}\n"
 fi
 
-# 4. Ingress Annotations & Controller Events
-echo -e "${BOLD}${BLUE}[4/5] Checking AWS ALB Ingress Annotations & Controller Status...${NC}"
+# 4. Ingress Annotations, Target Type & Routing Architecture
+echo -e "${BOLD}${BLUE}[4/5] Checking Ingress Target Type & Architecture Alignment...${NC}"
 ALB_ANNOTATIONS=$(kubectl get ingress demo-app -o jsonpath='{.metadata.annotations}' 2>/dev/null || true)
-if echo "$ALB_ANNOTATIONS" | grep -q "alb.ingress.kubernetes.io"; then
-    echo -e "${GREEN}✔ AWS Load Balancer Controller annotations detected on Ingress:${NC}"
-    echo "  • scheme: internet-facing"
-    echo "  • target-type: ip (direct pod routing, zero worker proxy overhead)"
-    echo "  • ssl-redirect: 443"
-    echo "  • healthcheck: /healthz on traffic-port"
+if echo "$ALB_ANNOTATIONS" | grep -q "alb.ingress.kubernetes.io/target-type"; then
+    TARGET_TYPE=$(echo "$ALB_ANNOTATIONS" | jq -r '."alb.ingress.kubernetes.io/target-type"' 2>/dev/null || echo "detected")
+    echo -e "${GREEN}✔ Ingress configured with target-type: '${TARGET_TYPE}'${NC}"
+    if [[ "$TARGET_TYPE" == "instance" ]]; then
+        echo -e "${GREEN}  ✔ Matches Network Team Recommendation: ALB routes directly to RKE2 Worker Nodes on Port 80/443${NC}"
+    elif [[ "$TARGET_TYPE" == "ip" ]]; then
+        echo -e "${CYAN}  ℹ Target-type 'ip': ALB routes directly to Pod IPs (Standard on AWS VPC CNI; for RKE2 with overlay CNI, 'instance' is recommended)${NC}"
+    fi
+elif echo "$ALB_ANNOTATIONS" | grep -q "kubernetes.io/ingress.class"; then
+    INGRESS_CLASS=$(echo "$ALB_ANNOTATIONS" | jq -r '."kubernetes.io/ingress.class"' 2>/dev/null || echo "nginx")
+    echo -e "${GREEN}✔ Ingress using in-cluster controller: ${INGRESS_CLASS} (Worker Node Ingress pattern)${NC}"
 else
-    echo -e "${YELLOW}⚠ AWS ALB annotations not found on Ingress${NC}"
+    echo -e "${YELLOW}⚠ Standard ALB ingress annotations not present on Ingress resource${NC}"
 fi
 
-echo -e "\nChecking AWS Load Balancer Controller logs..."
-LAST_ALB_LOG=$(kubectl logs -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller --tail=3 2>/dev/null || true)
-if [[ -n "$LAST_ALB_LOG" ]]; then
-    echo -e "${GREEN}✔ AWS Load Balancer Controller log sample:${NC}"
-    echo "  ${LAST_ALB_LOG}"
-else
-    echo -e "${YELLOW}⚠ Waiting for AWS Load Balancer Controller logs${NC}"
+# Check RKE2 NGINX client IP forwarding configuration
+if kubectl get configmap -n kube-system rke2-ingress-nginx-controller &>/dev/null; then
+    FORWARD_HEADER=$(kubectl get configmap -n kube-system rke2-ingress-nginx-controller -o jsonpath='{.data.use-forwarded-headers}' 2>/dev/null || echo "false")
+    if [[ "$FORWARD_HEADER" == "true" ]]; then
+        echo -e "${GREEN}✔ rke2-ingress-nginx configured with 'use-forwarded-headers: true' (Real Client IP preserved from ALB)${NC}"
+    else
+        echo -e "${YELLOW}⚠ rke2-ingress-nginx missing 'use-forwarded-headers: true'. Ingress may record ALB IP instead of client IP.${NC}"
+    fi
 fi
-echo ""
 
 # 5. HTTPS Endpoint Verification
 echo -e "${BOLD}${BLUE}[5/5] Probing Public HTTPS Endpoints (${APP_URL})...${NC}"

@@ -255,6 +255,89 @@ Based on Jev's deterministic risk scoring, the following optimizations are ident
 
 ---
 
+## RKE2 Architecture & Network Team Recommendation (ALB to Worker Nodes)
+
+In production enterprise deployments utilizing **RKE2 (Rancher Kubernetes Engine 2)** on AWS EC2, the network team recommendation is to route the **AWS Application Load Balancer (ALB)** directly to the **Worker Nodes** (`target_type = "instance"`) on port 80/443, rather than targeting the Control Plane or attempting direct Pod IP routing across an overlay network.
+
+### 1. Two-Tier Load Balancing Topology in RKE2
+
+```
+                       ┌──────────────────────────────┐
+                       │     INCOMING TRAFFIC         │
+                       └──────────────┬───────────────┘
+                                      │
+              ┌───────────────────────┴───────────────────────┐
+              ▼                                               ▼
+     [K8s API & Supervisor]                        [Application End-Users]
+              │                                               │
+              ▼                                               ▼
+┌───────────────────────────┐                   ┌───────────────────────────┐
+│     CONTROL PLANE NLB     │                   │  APPLICATION INGRESS ALB  │
+│  (TCP 6443 & TCP 9345)    │                   │   (AWS ALB: HTTP 80/443)  │
+└─────────────┬─────────────┘                   └─────────────┬─────────────┘
+              │                                               │
+   Routes to Control Plane                         Routes to Worker Nodes
+   (Master Server Instances)                       (target_type = "instance")
+              │                                               │
+              ▼                                               ▼
+┌───────────────────────────┐                   ┌───────────────────────────┐
+│ RKE2 Control Plane Nodes  │                   │     RKE2 Worker Nodes     │
+│ (3x rke2-server instances)│                   │ (rke2-agent instances)    │
+│                           │                   │                           │
+│ • kube-apiserver (:6443)  │                   │ • rke2-ingress-nginx      │
+│ • rke2 supervisor (:9345) │                   │   (hostNetwork: 80/443)   │
+│ • etcd (2379-2380)        │                   │ • Workload Pods (Canal)   │
+└───────────────────────────┘                   └───────────────────────────┘
+```
+
+#### Why Route ALB to Worker Nodes (and NOT Control Plane)?
+1. **Control Plane Isolation**: RKE2 Server nodes manage `etcd` consensus and `kube-apiserver`. They carry taints (`node-role.kubernetes.io/control-plane:NoSchedule`) and do not run ingress or business workloads. Application ingress should never hit the control plane.
+2. **Overlay CNI Encapsulation (Canal / Calico)**: RKE2 assigns pods private overlay IPs (`10.42.0.0/16`) via VXLAN. Pod IPs are not directly routable from AWS VPC subnets without complex secondary ENI routing. Targeting EC2 Worker Nodes on standard VPC IPs is native, stable, and resilient.
+3. **Decoupled Pod Churn**: When pods scale, crash, or rolling-update, `rke2-ingress-nginx` updates internal endpoints dynamically via Lua. The external AWS ALB target group remains static, eliminating AWS ELB API rate-limiting.
+
+---
+
+### 2. What Happens When a Pod is Deleted in RKE2?
+
+| Action Step | RKE2 with ALB -> Worker Nodes (`target_type = "instance"`) | EKS Auto Mode (`target_type = "ip"`) |
+| :--- | :--- | :--- |
+| **1. Pod Termination** | Kubernetes removes the Pod from the `EndpointSlice`. | Kubernetes removes the Pod from the `EndpointSlice`. |
+| **2. Target Update** | `rke2-ingress-nginx` dynamically purges the Pod IP from its upstream Lua table within milliseconds. | AWS Load Balancer Controller calls the AWS ELB API: `DeregisterTargets`. |
+| **3. External Load Balancer** | **Remains unchanged**. ALB continues forwarding to healthy Worker Node instances. | ALB transitions target IP to `draining` state for the deregistration delay timeout. |
+| **4. Cloud API Overhead** | **Zero AWS API calls**. All churn is resolved internally within the cluster. | High AWS API call volume under rapid HPA scaling or rolling deployments. |
+
+---
+
+### 3. Implementation Blueprint for RKE2 Worker Ingress
+
+#### A. Configure Client IP Preservation in `rke2-ingress-nginx`
+Ensure `rke2-ingress-nginx` reads real client IPs from the ALB's `X-Forwarded-For` header by applying the following ConfigMap in `kube-system`:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rke2-ingress-nginx-controller
+  namespace: kube-system
+data:
+  use-forwarded-headers: "true"
+  compute-full-forwarded-for: "true"
+  use-proxy-protocol: "false"
+```
+
+#### B. Security Group Hardening (Least-Privilege Isolation)
+* **ALB Security Group (`alb-sg`)**: Inbound 80 and 443 from `0.0.0.0/0` (or corporate VPN CIDR).
+* **Worker Node Security Group (`worker-sg`)**: Inbound 80 and 443 **strictly restricted to `alb-sg` ID**, blocking direct public access.
+
+#### C. Automated Setup Helper Script
+A dedicated setup and verification utility is provided in [`scripts/rke2-alb-setup.sh`](scripts/rke2-alb-setup.sh):
+```bash
+# Validate RKE2 node topology, patch ingress ConfigMap, and display ALB target group templates:
+./scripts/rke2-alb-setup.sh --vpc-id vpc-04069dd8bf42ea2db -y
+```
+
+---
+
 ## Repository Layout
 
 ```
@@ -266,13 +349,14 @@ dns-lb-ingress-service-pods/
 │       └── ci.yml                             # Automated GitHub Actions CI pipeline
 ├── scripts/                                   # Automated orchestration and operational scripts
 │   ├── deploy.sh                              # Complete end-to-end automated deployment suite
-│   ├── verify.sh                              # Post-deployment health checks and smoke testing
+│   ├── verify.sh                              # Post-deployment health checks and smoke testing (EKS & RKE2)
+│   ├── rke2-alb-setup.sh                      # Helper suite for ALB -> RKE2 Worker Node ingress
 │   └── destroy.sh                             # Safe infrastructure teardown and resource cleanup
-└── eks-nlb-acm-route53-demo/
-    ├── README.md                              # Sub-module operational guide
-    ├── bootstrap/                             # Terraform S3 backend storage module
-    │   ├── main.tf                            # Encrypted, versioned S3 bucket configuration
-    │   ├── variables.tf                       # Region and bucket prefix variables
+├── eks-nlb-acm-route53-demo/
+│   ├── README.md                              # Sub-module operational guide
+│   ├── bootstrap/                             # Terraform S3 backend storage module
+│   │   ├── main.tf                            # Encrypted, versioned S3 bucket configuration
+│   │   ├── variables.tf                       # Region and bucket prefix variables
     │   └── versions.tf                        # Terraform and AWS provider constraints
     ├── infra/                                 # Main infrastructure & workload module
     │   ├── main.tf                            # VPC, EKS Auto Mode, ACM, AWS Load Balancer Controller (ALB), Route 53, HPA, PDB

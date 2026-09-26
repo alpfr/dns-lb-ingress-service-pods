@@ -266,6 +266,7 @@ At current live volume (~6,200 requests on `app.alpfrtech.com`), Jev operational
 2. **ExternalDNS Integration**: Decouple the 45-second `time_sleep` Terraform provisioner by having the Kubernetes `external-dns` operator manage Route 53 records natively from Ingress annotations.
 3. **NetworkPolicy Microsegmentation**: Narrow the `ip_block` in `kubernetes_network_policy_v1.app_ingress_isolation` from the full VPC CIDR (`10.0.0.0/16`) to the specific ALB public subnets.
 4. **Directory & Naming Clarity**: Submodule directory retains the legacy label `eks-nlb-acm-route53-demo` while running an AWS ALB; document or symlink to reflect Layer-7 ALB routing.
+5. **RKE2 Alignment (ALB to Worker Nodes)**: In RKE2 environments (using Canal/Calico overlay CNI), configure the ALB Target Group with `target_type = "instance"` on port 80/443 targeting Worker Nodes directly. This matches the enterprise network team recommendation and isolates pod deletion churn strictly to `rke2-ingress-nginx`.
 
 ---
 

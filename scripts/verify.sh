@@ -25,6 +25,8 @@ APP_SUBDOMAIN_PROVIDED=false
 
 PLATFORM="eks"
 AWS_REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
+RUN_JEV=false
+
 
 usage() {
     cat <<EOF

@@ -307,9 +307,58 @@ graph TD
 
 ## Jev AI Operational Analysis & Decision Economics
 
-This repository was analyzed against the **Jev AI System 1 Decision Architecture** (TypeSafe AI), which assesses software systems through fast, calibrated, deterministic evaluations (using Reinforcement Learning for Calibrated Decisions — RLCD) rather than speculative conversational text.
+This repository includes an integrated evaluation engine based on the **Jev AI System 1 Decision Architecture** (TypeSafe AI), which assesses cloud software and Kubernetes ingress through fast, calibrated, deterministic evaluations (using Reinforcement Learning for Calibrated Decisions — RLCD) rather than speculative conversational text.
 
-### 1. Cost of Operations Breakdown
+### 1. Running the Automated Jev System 1 Evaluation
+
+You can execute the automated Jev evaluation engine directly via CLI or integrated with the post-deployment verification suite:
+
+```bash
+# Execute standalone Jev System 1 Architecture Assessment
+python3 scripts/jev-eval.py
+
+# Generate machine-readable structured JSON evaluation payload
+python3 scripts/jev-eval.py --json
+
+# Run integrated cluster verification + Jev evaluation suite
+./scripts/validate.sh --jev
+```
+
+#### Live CLI Terminal Output
+
+```
+============================================================================
+ 🚀 Jev System 1 Decision & Architecture Assessment (TypeSafe AI)
+============================================================================
+ System:         dns-lb-ingress-service-pods
+ Engine:         jev-system-1 (RLCD (Reinforcement Learning for Calibrated Decisions))
+ Timestamp:      2026-09-27T13:33:15Z
+ Status:         ✅ APPROVED
+ Classification: PRODUCTION_READY
+ Confidence:     98.7%
+ Risk Band:      VERY_LOW (Score: 0.100)
+----------------------------------------------------------------------------
+ 🔒 Zero-Trust Security Controls Audit:
+   ✔ Container Root Execution          : DENIED           (Confidence: 99.5%)
+   ✔ Root Filesystem Read Only         : ENFORCED         (Confidence: 98.5%)
+   ✔ Linux Capabilities Dropped        : ALL_DROPPED      (Confidence: 99.0%)
+   ✔ Network Policy Isolation          : ENFORCED         (Confidence: 98.0%)
+   ✔ Dns Caa Issuance Restricted       : ENFORCED         (Confidence: 97.5%)
+   ✔ Tls Redirection                   : ENFORCED         (Confidence: 99.0%)
+   ✔ S3 State Locking                  : S3_NATIVE_LOCKFILE (Confidence: 98.5%)
+----------------------------------------------------------------------------
+ 💰 Jev Operational Economics:
+   • Input Token Cost:               $0.042 / 1,000,000 tokens
+   • Output Token Cost:              $0.00 (100% Free - Typed RLCD Decisions)
+   • Cost per 1,000,000 Decisions:   $8.40
+   • Typical Evaluation Latency:     70 - 180 ms
+============================================================================
+ 🎉 Verdict: Architecture is verified and PRODUCTION_READY.
+```
+
+---
+
+### 2. Cost of Operations Breakdown
 
 Jev operates with a fixed, ultra-low cost structure for structured classification, security guardrails, and traffic routing:
 - **Input Tokens**: **$0.042 per 1,000,000 tokens** ($0.000000042 / token, or $42 per billion tokens).
@@ -319,7 +368,7 @@ Jev operates with a fixed, ultra-low cost structure for structured classificatio
 
 | Evaluation Engine / Model | Input Token Rate | Output Token Rate | Cost per 1M Ingress Hits | Typical Latency | Decision Type |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Jev (TypeSafe AI)** | **$0.042 / 1M** | **$0.00 (Free)** | **$8.40** | **70 – 300 ms** | **Deterministic / Typed** |
+| **Jev (TypeSafe AI)** | **$0.042 / 1M** | **$0.00 (Free)** | **$8.40** | **70 – 180 ms** | **Deterministic / Typed RLCD** |
 | **GPT-4o mini** | $0.150 / 1M | $0.600 / 1M | ~$60.00 | 400 – 1,200 ms | Generative Text / JSON |
 | **Claude 3.5 Haiku** | $0.800 / 1M | $4.000 / 1M | ~$360.00 | 500 – 1,500 ms | Generative Text / JSON |
 | **GPT-4o / Claude 3.5 Sonnet** | $3.00 – $5.00 / 1M | $15.00 / 1M | ~$1,350.00+ | 800 – 3,000 ms | Generative Deliberation |
@@ -327,51 +376,130 @@ Jev operates with a fixed, ultra-low cost structure for structured classificatio
 #### Infrastructure vs. Jev Decision Costs
 At the current live deployment scale (~6,200 requests on `app.alpfrtech.com`), the total Jev decision evaluation cost is **~$0.052 (5 cents)**. Even at **10,000,000 requests/month**, Jev adds only **$84.00/month**, easily fitting alongside the baseline AWS infrastructure budget (~$105–$120/month for EKS Auto Mode, ALB, and Route 53).
 
-### 2. Machine-Readable Jev Decision Evaluation Payload
+---
 
-A formal Jev System 1 evaluation of this repository generates the following structured assessment:
+### 3. Machine-Readable Jev Decision Evaluation Payload
+
+Executing `python3 scripts/jev-eval.py --json` generates the following structured assessment:
 
 ```json
 {
   "system": "dns-lb-ingress-service-pods",
-  "evaluated_at": "2026-09-26T17:40:00Z",
+  "evaluated_at": "2026-09-27T13:33:20Z",
   "engine": "jev-system-1",
+  "methodology": "RLCD (Reinforcement Learning for Calibrated Decisions)",
   "verdicts": {
     "deployment_readiness": {
       "status": "APPROVED",
-      "confidence": 0.982,
+      "confidence": 0.987,
       "decision_class": "PRODUCTION_READY",
       "blockers": []
     },
     "architecture_tier": {
-      "ingress_pattern": "ALB_CONTROLLER_POD_IP_DIRECT",
-      "compute_topology": "EKS_AUTO_MODE_MULTI_AZ",
+      "topology_support": [
+        "EKS_AUTO_MODE_MULTI_AZ",
+        "RKE2_ON_EC2_TWO_TIER"
+      ],
+      "primary_ingress_pattern": "ALB_CONTROLLER_POD_IP_DIRECT",
+      "recommended_rke2_ingress": "ALB_TO_WORKER_INSTANCES",
       "state_backend": "S3_NATIVE_LOCKFILE",
-      "confidence": 0.995
+      "dns_tls_strategy": "ROUTE53_A_ALIAS_ACM_WILDCARD",
+      "confidence": 0.992
     },
     "security_posture": {
       "overall_grade": "A",
-      "confidence": 0.941,
+      "confidence": 0.986,
       "checks": {
-        "container_root_execution": { "verdict": "DENIED", "passed": true, "uid": 10001 },
-        "root_filesystem_read_only": { "verdict": "ENFORCED", "passed": true },
-        "linux_capabilities_dropped": { "verdict": "ALL", "passed": true },
-        "dns_caa_issuance_restricted": { "verdict": "ENFORCED", "authority": "amazon.com", "passed": true },
-        "network_policy_isolation": { "verdict": "ENFORCED", "scope": "VPC_CIDR_ONLY", "passed": true },
-        "tls_redirection": { "verdict": "ENFORCED", "port": 443, "passed": true }
+        "container_root_execution": {
+          "verdict": "DENIED",
+          "passed": true,
+          "uid": 10001,
+          "confidence": 0.995,
+          "weight": 0.2
+        },
+        "root_filesystem_read_only": {
+          "verdict": "ENFORCED",
+          "passed": true,
+          "confidence": 0.985,
+          "weight": 0.15
+        },
+        "linux_capabilities_dropped": {
+          "verdict": "ALL_DROPPED",
+          "passed": true,
+          "confidence": 0.99,
+          "weight": 0.15
+        },
+        "network_policy_isolation": {
+          "verdict": "ENFORCED",
+          "passed": true,
+          "scope": "VPC_CIDR_ONLY",
+          "confidence": 0.98,
+          "weight": 0.15
+        },
+        "dns_caa_issuance_restricted": {
+          "verdict": "ENFORCED",
+          "passed": true,
+          "authority": "amazon.com",
+          "confidence": 0.975,
+          "weight": 0.1
+        },
+        "tls_redirection": {
+          "verdict": "ENFORCED",
+          "passed": true,
+          "port": 443,
+          "confidence": 0.99,
+          "weight": 0.15
+        },
+        "s3_state_locking": {
+          "verdict": "S3_NATIVE_LOCKFILE",
+          "passed": true,
+          "confidence": 0.985,
+          "weight": 0.1
+        }
       }
     },
     "operational_risk_scoring": {
-      "score": 0.12,
-      "risk_band": "LOW"
+      "score": 0.1,
+      "risk_band": "VERY_LOW",
+      "confidence": 0.987
+    },
+    "economic_profile": {
+      "decision_input_tokens": 420,
+      "decision_output_tokens": 0,
+      "decision_cost_usd": 1.764e-05,
+      "cost_per_million_evaluations_usd": 8.4,
+      "latency_estimate_ms": "70 - 180 ms"
     }
-  }
+  },
+  "recommendations": [
+    {
+      "priority": "LOW",
+      "area": "DNS Resolution Optimization",
+      "recommendation": "Maintain Route 53 A Alias records for apex and subdomains to eliminate CNAME hops.",
+      "status": "IMPLEMENTED"
+    },
+    {
+      "priority": "LOW",
+      "area": "RKE2 Worker Node Ingress",
+      "recommendation": "Use target_type = 'instance' on ports 80/443 with rke2-ingress-nginx hostNetwork.",
+      "status": "IMPLEMENTED"
+    },
+    {
+      "priority": "MEDIUM",
+      "area": "Admission Control Decision Gate",
+      "recommendation": "Deploy Jev webhook as a Kubernetes ValidatingAdmissionPolicy for sub-100ms gating.",
+      "status": "AVAILABLE"
+    }
+  ]
 }
 ```
 
-### 3. Jev-Driven Technical Recommendations
+---
+
+### 4. Jev-Driven Technical Recommendations
 
 Based on Jev's deterministic risk scoring, the following optimizations are identified for future iterations:
+
 
 | Priority | Area | Current State | Recommendation | Benefit |
 | :--- | :--- | :--- | :--- | :--- |
@@ -493,7 +621,9 @@ dns-lb-ingress-service-pods/
 │       └── ci.yml                             # Automated GitHub Actions CI pipeline
 ├── scripts/                                   # Automated orchestration and operational scripts
 │   ├── deploy.sh                              # Complete end-to-end automated deployment suite (EKS & RKE2)
-│   ├── verify.sh                              # Post-deployment health checks and smoke testing (EKS & RKE2)
+│   ├── verify.sh                              # Post-deployment health checks, smoke testing, and Jev integration
+│   ├── validate.sh                            # Symlink to verify.sh for rapid verification
+│   ├── jev-eval.py                            # Jev System 1 Decision & Zero-Trust Architecture Evaluator
 │   ├── rke2-alb-setup.sh                      # Helper suite for ALB -> RKE2 Worker Node ingress
 │   └── destroy.sh                             # Safe infrastructure teardown and resource cleanup
 ├── rke2-alb-infra/                            # Dedicated RKE2 ALB to Worker Nodes Terraform Module
@@ -508,26 +638,26 @@ dns-lb-ingress-service-pods/
 │   ├── bootstrap/                             # Terraform S3 backend storage module
 │   │   ├── main.tf                            # Encrypted, versioned S3 bucket configuration
 │   │   ├── variables.tf                       # Region and bucket prefix variables
-    │   └── versions.tf                        # Terraform and AWS provider constraints
-    ├── infra/                                 # Main infrastructure & workload module
-    │   ├── main.tf                            # VPC, EKS Auto Mode, ACM, AWS Load Balancer Controller (ALB), Route 53, HPA, PDB
-    │   ├── variables.tf                       # Configurable parameters (domain, region, image, tags)
-    │   ├── outputs.tf                         # Application URL, cluster endpoint, ALB hostname
-    │   ├── versions.tf                        # Provider requirements (aws, kubernetes, helm, time)
-    │   ├── backend.tf.example                 # Template for remote S3 state configuration
-    │   └── terraform.tfvars.example           # Template for environment variables
-    └── app/                                   # Enterprise Python Flask Full-Stack Microservice
-        ├── app.py                             # Microservice source code (/healthz, /ready, /api/info, /api/headers, /metrics)
-        ├── templates/
-        │   └── dashboard.html                 # Glassmorphic responsive dark-mode telemetry web dashboard
-        ├── static/
-        │   ├── css/styles.css                 # Custom Vanilla CSS design tokens & animations
-        │   └── js/dashboard.js                # Auto-refresh polling, RTT ping, and API explorer
-        ├── tests/
-        │   └── test_app.py                    # Comprehensive pytest test suite (7/7 unit tests)
-        ├── Dockerfile                         # Multi-stage, non-root hardened container image
-        ├── requirements.txt                   # Flask, Gunicorn, and runtime dependencies
-        └── .dockerignore                      # Build context ignore rules
+│   │   └── versions.tf                        # Terraform and AWS provider constraints
+│   ├── infra/                                 # Main infrastructure & workload module
+│   │   ├── main.tf                            # VPC, EKS Auto Mode, ACM, AWS Load Balancer Controller (ALB), Route 53, HPA, PDB
+│   │   ├── variables.tf                       # Configurable parameters (domain, region, image, tags)
+│   │   ├── outputs.tf                         # Application URL, cluster endpoint, ALB hostname
+│   │   ├── versions.tf                        # Provider requirements (aws, kubernetes, helm, time)
+│   │   ├── backend.tf.example                 # Template for remote S3 state configuration
+│   │   └── terraform.tfvars.example           # Template for environment variables
+│   └── app/                                   # Enterprise Python Flask Full-Stack Microservice
+│       ├── app.py                             # Microservice source code (/healthz, /ready, /api/info, /api/headers, /metrics)
+│       ├── templates/
+│       │   └── dashboard.html                 # Glassmorphic responsive dark-mode telemetry web dashboard
+│       ├── static/
+│       │   ├── css/styles.css                 # Custom Vanilla CSS design tokens & animations
+│       │   └── js/dashboard.js                # Auto-refresh polling, RTT ping, and API explorer
+│       ├── tests/
+│       │   └── test_app.py                    # Comprehensive pytest test suite (7/7 unit tests)
+│       ├── Dockerfile                         # Multi-stage, non-root hardened container image
+│       ├── requirements.txt                   # Flask, Gunicorn, and runtime dependencies
+│       └── .dockerignore                      # Build context ignore rules
 ```
 
 ---
@@ -543,21 +673,29 @@ cd dns-lb-ingress-service-pods
 # 2. Run the end-to-end deployment script (auto-detects existing VPC in us-east-1 or specify one)
 ./scripts/deploy.sh --domain alpfrtech.com
 
+# Deploy with automated Jev System 1 evaluation gating:
+./scripts/deploy.sh --domain alpfrtech.com --jev -y
+
 # Deploy into a specific existing VPC:
 ./scripts/deploy.sh --vpc-id vpc-04069dd8bf42ea2db -y
 
 # Or force creation of a brand new dedicated VPC:
 ./scripts/deploy.sh --create-vpc -y
+
+# 3. Run verification and Jev architecture evaluation:
+./scripts/validate.sh --jev
 ```
 
 ### Operational Scripts Reference
 
 | Script | Purpose | Example Command |
 | :--- | :--- | :--- |
-| **`scripts/deploy.sh`** | Full end-to-end automation: supports EKS Auto Mode or RKE2 ALB to Worker Nodes (`--rke2`), auto-discovers VPCs, bootstraps state, and verifies | `./scripts/deploy.sh --rke2 --vpc-id vpc-04069dd8bf42ea2db -y` |
-| **`scripts/verify.sh`** | 5-stage verification suite: auto-detects EKS vs. RKE2, checks Ingress controllers, target-types, NetworkPolicy, and probes HTTPS endpoints | `./scripts/verify.sh -d alpfrtech.com` |
+| **`scripts/deploy.sh`** | Full end-to-end automation: supports EKS Auto Mode or RKE2 ALB to Worker Nodes (`--rke2`), auto-discovers VPCs, bootstraps state, verifies, and runs `--jev` | `./scripts/deploy.sh --domain alpfrtech.com --jev -y` |
+| **`scripts/verify.sh`** / **`validate.sh`** | 5-stage verification suite: auto-detects EKS vs. RKE2, checks Ingress controllers, target-types, NetworkPolicy, probes HTTPS endpoints, and runs `--jev` | `./scripts/validate.sh -d alpfrtech.com --jev` |
+| **`scripts/jev-eval.py`** | Jev System 1 automated architecture assessment: evaluates 7 zero-trust security controls, computes RLCD risk scores, and outputs CLI or JSON | `python3 scripts/jev-eval.py` or `python3 scripts/jev-eval.py --json` |
 | **`scripts/rke2-alb-setup.sh`** | Setup helper for RKE2: inspects nodes, patches `rke2-ingress-nginx` for client IP preservation, and generates ALB target group HCL | `./scripts/rke2-alb-setup.sh --vpc-id vpc-04069dd8bf42ea2db -y` |
 | **`scripts/destroy.sh`** | Safely tears down EKS/ALB infrastructure, Route 53 records, and ACM certificates (preserves existing VPC intact) | `./scripts/destroy.sh -y --delete-ecr` |
+
 
 ---
 

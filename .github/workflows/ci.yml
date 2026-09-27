@@ -63,10 +63,31 @@ jobs:
       - name: Python Bytecode Compilation Check
         run: |
           python -m py_compile eks-nlb-acm-route53-demo/app/app.py
+          python -m py_compile scripts/jev-eval.py
 
       - name: Lint with Flake8
         run: |
           flake8 eks-nlb-acm-route53-demo/app --count --max-line-length=120 --statistics
+
+  jev-architecture-evaluation:
+    name: Jev System 1 Decision & Risk Assessment
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Execute Jev System 1 Architecture Assessment
+        run: |
+          python3 scripts/jev-eval.py
+
+      - name: Validate Jev Structured JSON Output
+        run: |
+          python3 scripts/jev-eval.py --json | jq .
 
   docker-build-test:
     name: Docker Image Build Validation
@@ -98,3 +119,4 @@ jobs:
             echo "Checking syntax for $script..."
             bash -n "$script"
           done
+

@@ -67,6 +67,7 @@ SKIP_BOOTSTRAP=false
 SKIP_BUILD=false
 AUTO_APPROVE=false
 CREATE_ROUTE53_ZONE=false
+RUN_JEV=false
 
 usage() {
     cat <<EOF
@@ -77,6 +78,7 @@ ECR repository, container build & push, AWS ALB Ingress with ACM TLS, and Route 
 
 Options:
   --rke2                    Deploy ALB for RKE2 Worker Nodes (target-type: instance per Network Team)
+  --jev                     Run Jev System 1 Decision & Architecture Evaluation after deployment
   -d, --domain DOMAIN       Route 53 public hosted zone name (default: alpfrtech.com)
   -s, --subdomain SUB       Subdomain prefix for application (default: app)
   -r, --region REGION       AWS region (default: us-east-1 or \$AWS_REGION)
@@ -93,6 +95,7 @@ Options:
 
 Examples:
   $(basename "$0")
+  $(basename "$0") --jev
   $(basename "$0") --rke2 --vpc-id vpc-04069dd8bf42ea2db
   $(basename "$0") --create-vpc
   $(basename "$0") --domain alpfrtech.com -y
@@ -107,6 +110,10 @@ while [[ $# -gt 0 ]]; do
             INFRA_DIR="${ROOT_DIR}/rke2-alb-infra"
             SKIP_BUILD=true
             SKIP_BOOTSTRAP=true
+            shift
+            ;;
+        --jev)
+            RUN_JEV=true
             shift
             ;;
         -d|--domain)
@@ -520,7 +527,14 @@ fi
 
 echo "Running verification checks..."
 if [[ -f "${SCRIPT_DIR}/verify.sh" ]]; then
-    bash "${SCRIPT_DIR}/verify.sh" --domain "$DOMAIN_NAME" --subdomain "$APP_SUBDOMAIN"
+    VERIFY_ARGS=("--domain" "$DOMAIN_NAME" "--subdomain" "$APP_SUBDOMAIN")
+    if [[ "$PLATFORM" == "rke2" ]]; then
+        VERIFY_ARGS+=("--rke2")
+    fi
+    if [[ "$RUN_JEV" == true ]]; then
+        VERIFY_ARGS+=("--jev")
+    fi
+    bash "${SCRIPT_DIR}/verify.sh" "${VERIFY_ARGS[@]}"
 else
     kubectl get pods,svc,ingress -A
 fi

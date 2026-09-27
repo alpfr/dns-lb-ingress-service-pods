@@ -34,6 +34,7 @@ Performs cluster, ingress, pod, and HTTP endpoint health checks.
 
 Options:
   --rke2                    Validate RKE2 ALB to Worker Nodes deployment
+  --jev                     Run Jev System 1 Decision & Architecture Evaluation
   -d, --domain DOMAIN       Route 53 public domain (default: alpfrtech.com)
   -s, --subdomain SUB       Subdomain prefix (default: app)
   -r, --region REGION       AWS Region (default: us-east-1)
@@ -41,6 +42,7 @@ Options:
 
 Examples:
   $(basename "$0")
+  $(basename "$0") --jev
   $(basename "$0") --rke2
   $(basename "$0") --domain alpfrtech.com
   $(basename "$0") -d alpfrtech.com -s app
@@ -53,6 +55,10 @@ while [[ $# -gt 0 ]]; do
         --rke2)
             PLATFORM="rke2"
             INFRA_DIR="${ROOT_DIR}/rke2-alb-infra"
+            shift
+            ;;
+        --jev)
+            RUN_JEV=true
             shift
             ;;
         -d|--domain)
@@ -269,4 +275,8 @@ else
 fi
 
 echo -e "\n${BOLD}${GREEN}✔ Verification script completed successfully.${NC}"
+
+if [[ "$RUN_JEV" == true && -f "${SCRIPT_DIR}/jev-eval.py" ]]; then
+    python3 "${SCRIPT_DIR}/jev-eval.py"
+fi
 
